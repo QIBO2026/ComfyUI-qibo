@@ -23,3 +23,5 @@ nul
 图像描述_合成场景.json
 图像描述_统一风格.json
 图像山水画.json
+# Gitee 多账号令牌配置（本地敏感，禁止提交）
+.gitee_tokens.json
