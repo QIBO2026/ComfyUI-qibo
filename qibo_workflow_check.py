@@ -359,6 +359,11 @@ def register_server_routes():
     @routes.post("/qibo/update_self")
     async def qibo_update_self(request):
         def _git_pull():
+            # 规避 git dubious ownership（仓库目录属主与运行用户不一致时 git 拒绝操作）
+            subprocess.run(
+                ["git", "config", "--global", "--add", "safe.directory", _HERE],
+                capture_output=True,
+            )
             return subprocess.run(
                 ["git", "pull"],
                 cwd=_HERE,
