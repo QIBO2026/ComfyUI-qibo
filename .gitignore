@@ -25,3 +25,5 @@ nul
 图像山水画.json
 # Gitee 多账号令牌配置（本地敏感，禁止提交）
 .gitee_tokens.json
+# ModelScope API 令牌本地存储（更新插件不覆盖，禁止提交）
+qibo_tokens.local.json

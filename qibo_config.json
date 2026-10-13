@@ -99,9 +99,7 @@
       "weight": 0.8
     }
   ],
-  "api_tokens": [
-    "ms-5e142dd4-2dd1-436c-9bed-6d8959b8062d"
-  ],
+  "api_tokens": [],
   "api_endpoints": {
     "image_generation": {
       "submit_url": "https://api-inference.modelscope.cn/v1/images/generations",

@@ -6,6 +6,8 @@ import re
 from typing import Optional, Tuple, List, Dict, Any
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'qibo_config.json')
+# 本地令牌文件：不被 git 跟踪（已加入 .gitignore），更新插件不会被覆盖
+LOCAL_TOKENS_PATH = os.path.join(os.path.dirname(__file__), 'qibo_tokens.local.json')
 
 DEFAULT_CONFIG = {
     "default_model": "Qwen/Qwen-Image",
@@ -115,7 +117,35 @@ def save_config(config: dict) -> bool:
         return False
 
 
+def _load_local_tokens_file() -> dict:
+    """读取本地令牌文件，不存在返回空 dict。"""
+    try:
+        if os.path.exists(LOCAL_TOKENS_PATH):
+            with open(LOCAL_TOKENS_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f) or {}
+    except Exception as e:
+        print(f"读取本地令牌文件失败: {e}")
+    return {}
+
+
+def _save_local_tokens_file(data: dict) -> bool:
+    """写入本地令牌文件。"""
+    try:
+        with open(LOCAL_TOKENS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print(f"保存本地令牌文件失败: {e}")
+        return False
+
+
 def save_api_tokens(tokens: List[str]) -> bool:
+    # 优先写入本地令牌文件（不被 git 跟踪，更新插件不覆盖）
+    local = _load_local_tokens_file()
+    local["api_tokens"] = tokens
+    if _save_local_tokens_file(local):
+        return True
+    # 本地文件写入失败时回退主配置
     try:
         cfg = load_config()
         cfg["api_tokens"] = tokens
@@ -126,6 +156,12 @@ def save_api_tokens(tokens: List[str]) -> bool:
 
 
 def load_api_tokens() -> List[str]:
+    # 优先读本地令牌文件
+    local = _load_local_tokens_file()
+    tokens_local = local.get("api_tokens", [])
+    if isinstance(tokens_local, list) and tokens_local:
+        return [token.strip() for token in tokens_local if token.strip()]
+    # 回退主配置（兼容旧数据/旧用户）
     try:
         cfg = load_config()
         tokens_from_cfg = cfg.get("api_tokens", [])
@@ -148,6 +184,11 @@ def parse_api_tokens(token_input: str) -> List[str]:
 
 
 def save_single_api_token(token: str) -> bool:
+    # 优先写入本地令牌文件
+    local = _load_local_tokens_file()
+    local["api_token"] = token.strip()
+    if _save_local_tokens_file(local):
+        return True
     try:
         cfg = load_config()
         cfg["api_token"] = token.strip()
@@ -158,6 +199,11 @@ def save_single_api_token(token: str) -> bool:
 
 
 def load_single_api_token() -> str:
+    # 优先读本地令牌文件
+    local = _load_local_tokens_file()
+    v_local = local.get("api_token", "")
+    if v_local:
+        return v_local.strip()
     try:
         cfg = load_config()
         return cfg.get("api_token", "").strip()
