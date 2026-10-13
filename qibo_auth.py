@@ -18,18 +18,35 @@ DEFAULT_CONFIG = {
     "default_seed": -1,
     "default_steps": 30,
     "default_guidance": 7.5,
-    "default_text_model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+    "default_text_model": "deepseek-ai/DeepSeek-V4.1-Flash",
     "default_system_prompt": "You are a helpful assistant.",
     "default_user_prompt": "你好",
     "api_token": "",
     "image_models": ["Qwen/Qwen-Image"],
     "image_edit_models": ["Qwen/Qwen-Image-Edit"],
-    "text_models": ["Qwen/Qwen3-Coder-480B-A35B-Instruct"],
+    "text_models": ["deepseek-ai/DeepSeek-V4.1-Flash"],
     "vision_models": ["stepfun-ai/step3"],
     "caption_models": ["Qwen/Qwen3-VL-8B-Instruct"],
     "default_lora_weight": 0.8,
     "lora_presets": [{"name": "无LoRA", "model_id": "", "weight": 0.8}],
     "api_tokens": [],
+    "api_endpoints": {
+        "image_generation": {
+            "submit_url": "https://api-inference.modelscope.cn/v1/images/generations",
+            "task_query_url": "https://api-inference.modelscope.cn/v1/tasks/{task_id}"
+        },
+        "image_edit": {
+            "submit_url": "https://api-inference.modelscope.cn/v1/images/generations",
+            "task_query_url": "https://api-inference.modelscope.cn/v1/tasks/{task_id}"
+        }
+    },
+    "remote_comfyui": {
+        "base_url": "https://c-2051810383756742658.ksai.scnet.cn:58043",
+        "workflow_file": "image_qwen_image_2_1_api.json",
+        "verify_ssl": False,
+        "poll_interval": 3,
+        "max_wait_seconds": 600
+    },
     "login_config": {
         "base_url": "https://modelscope.cn",
         "login_page_url": "https://modelscope.cn/login",
@@ -52,6 +69,40 @@ def load_config() -> dict:
     except Exception as e:
         print(f"读取配置文件失败，使用默认配置: {e}")
         return dict(DEFAULT_CONFIG)
+
+
+_DEFAULT_API_ENDPOINTS = DEFAULT_CONFIG["api_endpoints"]
+
+
+def get_api_endpoint(kind: str, which: str) -> str:
+    """读取 API 端点地址。
+
+    kind:  'image_generation' 或 'image_edit'
+    which: 'submit_url' 或 'task_query_url'
+    task_query_url 中可用 {task_id} 占位符，调用方自行 .replace('{task_id}', task_id)。
+    """
+    config = load_config()
+    endpoints = config.get("api_endpoints", {})
+    default_kind = _DEFAULT_API_ENDPOINTS.get(kind, {})
+    default_value = default_kind.get(which, "")
+    value = endpoints.get(kind, {}).get(which, "")
+    return value or default_value
+
+
+_DEFAULT_REMOTE_COMFYUI = DEFAULT_CONFIG["remote_comfyui"]
+
+
+def get_remote_comfyui_config() -> dict:
+    """读取远程 ComfyUI 配置（base_url/workflow_file/verify_ssl/poll_interval/max_wait_seconds）。
+
+    缺失字段自动回退 DEFAULT_CONFIG["remote_comfyui"]。
+    """
+    config = load_config()
+    rc = dict(_DEFAULT_REMOTE_COMFYUI)
+    user_rc = config.get("remote_comfyui", {})
+    for k, v in user_rc.items():
+        rc[k] = v
+    return rc
 
 
 def save_config(config: dict) -> bool:

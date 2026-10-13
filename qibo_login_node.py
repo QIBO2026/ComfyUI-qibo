@@ -77,7 +77,7 @@ class ModelScopeLoginNode:
     RETURN_TYPES = ("STRING", "STRING", "STRING")
     RETURN_NAMES = ("api_token", "username", "status_info")
     FUNCTION = "execute_login"
-    CATEGORY = "ModelScopeAPI/登录"
+    CATEGORY = "QIBO_API/登录"
 
     def execute_login(self, action, username="", password="", manual_token="",
                       headless=False, auto_fill=True, wait_timeout=120):
@@ -205,7 +205,7 @@ class ModelScopeTokenManageNode:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("api_token", "status_info")
     FUNCTION = "manage_tokens"
-    CATEGORY = "ModelScopeAPI/登录"
+    CATEGORY = "QIBO_API/登录"
 
     def manage_tokens(self, action, token_input="", token_index=1):
         tokens = load_api_tokens()

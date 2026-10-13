@@ -1,0 +1,25 @@
+# Python 编译缓存
+__pycache__/
+*.pyc
+
+# 参考图缓存
+qibo_ref_repo/
+
+# 分块上传临时目录
+chunked_upload_temp/
+
+# 测试图片与测试脚本
+test_edit_result_*.png
+node_upload_test_result.png
+_test_*.py
+
+# 文档目录
+docs/
+
+# 误生成的空文件
+nul
+
+# 工作流 JSON（不对外发布）
+图像描述_合成场景.json
+图像描述_统一风格.json
+图像山水画.json

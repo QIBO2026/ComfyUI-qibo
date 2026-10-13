@@ -2,6 +2,7 @@
   "default_model": "Qwen/Qwen-Image",
   "timeout": 720,
   "image_download_timeout": 30,
+  "batch_parallel_workers": 3,
   "default_prompt": "A beautiful landscape",
   "default_negative_prompt": "",
   "default_width": 512,
@@ -9,11 +10,13 @@
   "default_seed": -1,
   "default_steps": 30,
   "default_guidance": 7.5,
-  "default_text_model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+  "default_text_model": "deepseek-ai/DeepSeek-V4.1-Flash",
   "default_system_prompt": "You are a helpful assistant.",
   "default_user_prompt": "你好",
   "api_token": "",
   "image_models": [
+    "Qwen/Qwen-Image-2.1",
+    "krea/Krea-2-Turbo",
     "Qwen/Qwen-Image",
     "MusePublic/Qwen-image",
     "Qwen/Qwen-Image-2512",
@@ -23,9 +26,14 @@
     "MAILAND/majicflus_v1",
     "MoYouuu/MYHuman-QWen",
     "Tongyi-MAI/Z-Image-Turbo",
+    "Q491791643/Krea-2-Turbo_Style_RainyImmortalCourtyard_3DGuoMan_Mugi_v1.0",
+    "taeny1314/Krea-2-Turbo-LiuLi",
+    "yan303145427/krea2-Cc-FQWZ-ArtStyle",
     "yan303145427/krea2-Cc-MJ-CinematicSoftLight"
   ],
   "image_edit_models": [
+    "Qwen/Qwen-Image-2.1",
+    "krea/Krea-2-Turbo",
     "Qwen/Qwen-Image-Edit",
     "MusePublic/Qwen-Image-Edit",
     "Qwen/Qwen-Image-Edit-2511",
@@ -33,14 +41,14 @@
     "black-forest-labs/FLUX.1-Kontext-dev"
   ],
   "text_models": [
-    "Qwen/Qwen3-Coder-480B-A35B-Instruct",
-    "Qwen/Qwen3-Coder-480B-A35B-Chat",
-    "Qwen/Qwen3-235B-A22B-Thinking-2507",
-    "Qwen3-235B-A22B-Instruct-2507",
-    "Qwen/Qwen3-Coder-140B-A35B-Instruct",
-    "Qwen/Qwen3-Coder-70B-A35B-Instruct",
+    "Qwen/Qwen3.8-Flash-Next",
+	"Qwen/Qwen3.8-27B",
+    "deepseek-ai/DeepSeek-V4.1-Flash",
     "deepseek-ai/DeepSeek-V3.1",
     "deepseek-ai/DeepSeek-R1-0528",
+    "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+    "Qwen/Qwen3-235B-A22B-Thinking-2507",
+    "Qwen/Qwen3.5-397B-A17B",
     "ZhipuAI/GLM-4.5"
   ],
   "vision_models": [
@@ -48,6 +56,7 @@
     "PaddlePaddle/ERNIE-4.5-VL-28B-A3B-PT"
   ],
   "caption_models": [
+    "Qwen/Qwen3.8-Flash-Next",
     "OpenGVLab/InternVL3_5-241B-A28B",
     "PaddlePaddle/ERNIE-4.5-VL-28B-A3B-PT"
   ],
@@ -70,6 +79,11 @@
       "weight": 0.8
     },
     {
+      "name": "Qwen-Image_生物朋克风格_风格材质大师系列",
+      "model_id": "qiyuanai/Qwen-Image_Biopunk-Style_Style-Material-Master-Series",
+      "weight": 0.8
+    },
+    {
       "name": "Qwen-小红薯-风格插画-排版",
       "model_id": "YJ777YJ/xiaohshu",
       "weight": 0.8
@@ -85,7 +99,27 @@
       "weight": 0.8
     }
   ],
-  "api_tokens": [],
+  "api_tokens": [
+    "ms-5e142dd4-2dd1-436c-9bed-6d8959b8062d"
+  ],
+  "api_endpoints": {
+    "image_generation": {
+      "submit_url": "https://api-inference.modelscope.cn/v1/images/generations",
+      "task_query_url": "https://api-inference.modelscope.cn/v1/tasks/{task_id}"
+    },
+    "image_edit": {
+      "submit_url": "https://api-inference.modelscope.cn/v1/images/generations",
+      "task_query_url": "https://api-inference.modelscope.cn/v1/tasks/{task_id}"
+    }
+  },
+  "remote_comfyui": {
+    "base_url": "https://c-2051810383756742658.ksai.scnet.cn:58043",
+    "workflow_file": "image_qwen_image_2_1_api.json",
+    "verify_ssl": false,
+    "poll_interval": 3,
+    "max_wait_seconds": 600
+  },
+
   "login_config": {
     "base_url": "https://modelscope.cn",
     "login_page_url": "https://modelscope.cn/login",
