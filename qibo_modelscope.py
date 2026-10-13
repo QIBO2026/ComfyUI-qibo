@@ -124,17 +124,31 @@ def _resolve_dest_dir(folder):
     return None
 
 
-def _download_direct(url, dest_path, timeout=1200):
-    headers = {
-        "User-Agent": UA,
-        "Accept": "application/octet-stream,*/*",
-        "Referer": "https://www.modelscope.cn/",
-    }
-    r = requests.get(url, stream=True, headers=headers, timeout=timeout, allow_redirects=True)
+def _build_download_headers(url):
+    """根据下载 URL 域名构造请求头，避免跨站 Referer 触发防盗链返回 HTML。"""
+    host = urllib.parse.urlparse(url).hostname or ""
+    headers = {"User-Agent": UA, "Accept": "application/octet-stream,*/*"}
+    if "modelscope.cn" in host:
+        headers["Referer"] = "https://www.modelscope.cn/"
+    return headers
+
+
+def _stream_get(url, timeout=1200):
+    """发起流式下载请求；若返回 HTML 则换无 Referer 浏览器头重试一次，仍 HTML 则抛异常。"""
+    r = requests.get(url, stream=True, headers=_build_download_headers(url), timeout=timeout, allow_redirects=True)
     r.raise_for_status()
-    ctype = r.headers.get("Content-Type", "")
-    if "text/html" in ctype:
+    if "text/html" not in r.headers.get("Content-Type", ""):
+        return r
+    r.close()
+    r = requests.get(url, stream=True, headers={"User-Agent": UA, "Accept": "*/*"}, timeout=timeout, allow_redirects=True)
+    r.raise_for_status()
+    if "text/html" in r.headers.get("Content-Type", ""):
         raise RuntimeError(f"下载链接返回 HTML 页面而非文件（可能需登录或链接已失效）: {url}")
+    return r
+
+
+def _download_direct(url, dest_path, timeout=1200):
+    r = _stream_get(url, timeout)
     total = int(r.headers.get("Content-Length", 0))
     done = 0
     with open(dest_path, "wb") as f:
@@ -150,20 +164,14 @@ _task_lock = threading.Lock()
 
 
 def _download_direct_with_progress(url, dest_path, task_id, timeout=1200):
-    headers = {
-        "User-Agent": UA,
-        "Accept": "application/octet-stream,*/*",
-        "Referer": "https://www.modelscope.cn/",
-    }
-    r = requests.get(url, stream=True, headers=headers, timeout=timeout, allow_redirects=True)
-    r.raise_for_status()
-    ctype = r.headers.get("Content-Type", "")
-    if "text/html" in ctype:
+    try:
+        r = _stream_get(url, timeout)
+    except Exception as e:
         with _task_lock:
             t = _download_tasks.get(task_id)
             if t:
                 t["status"] = "error"
-                t["error"] = "下载链接返回 HTML 页面而非文件"
+                t["error"] = str(e)
         return
     total = int(r.headers.get("Content-Length", 0))
     done = 0
