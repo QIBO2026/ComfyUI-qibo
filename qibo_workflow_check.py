@@ -364,13 +364,24 @@ def register_server_routes():
                 ["git", "config", "--global", "--add", "safe.directory", _HERE],
                 capture_output=True,
             )
-            return subprocess.run(
+            # 主源 Gitee，失败则切备源 GitHub（公开仓库匿名拉取）
+            proc = subprocess.run(
                 ["git", "pull"],
-                cwd=_HERE,
-                capture_output=True,
-                text=True,
-                timeout=120,
+                cwd=_HERE, capture_output=True, text=True, timeout=120,
             )
+            if proc.returncode == 0:
+                return proc
+            gh_proc = subprocess.run(
+                ["git", "pull", "https://github.com/QIBO2026/ComfyUI-qibo.git", "master"],
+                cwd=_HERE, capture_output=True, text=True, timeout=120,
+            )
+            if gh_proc.returncode == 0:
+                proc.stdout = f"[Gitee 拉取失败，已从 GitHub 备源更新成功]\n原 Gitee 错误: {(proc.stderr or '').strip()}\n" + (gh_proc.stdout or "")
+                proc.stderr = gh_proc.stderr
+                proc.returncode = 0
+                return proc
+            proc.stderr = (proc.stderr or "") + "\n[GitHub 备源也失败]: " + (gh_proc.stderr or "")
+            return proc
         try:
             proc = await asyncio.get_running_loop().run_in_executor(None, _git_pull)
             return web.json_response({
