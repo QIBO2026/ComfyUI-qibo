@@ -52,8 +52,19 @@ if errorlevel 1 (
     )
 )
 
-echo [3/3] 推送到 Gitee...
+echo [3/4] 拉取远程并合并(本地优先)...
 set PUSH_URL=https://%ACCOUNT%:%TOKEN%@gitee.com/%ACCOUNT%/%REPO%.git
+git fetch "%PUSH_URL%" master:refs/remotes/gitee_master
+git merge -X ours refs/remotes/gitee_master -m "merge remote, local first"
+if errorlevel 1 (
+    echo ❌ 合并失败，请手动解决后重跑
+    set PUSH_URL=
+    set TOKEN=
+    pause
+    exit /b 1
+)
+
+echo [4/4] 推送到 Gitee...
 git push "%PUSH_URL%" master
 set PUSH_RET=%errorlevel%
 

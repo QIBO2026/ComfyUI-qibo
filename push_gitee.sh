@@ -39,8 +39,17 @@ else
     git commit -m "update $(date +%Y-%m-%d)" || { echo "❌ git commit 失败"; exit 1; }
 fi
 
-echo "[3/3] 推送到 Gitee..."
+echo "[3/4] 拉取远程并合并（本地优先）..."
 PUSH_URL="https://${ACCOUNT}:${TOKEN}@gitee.com/${ACCOUNT}/${REPO}.git"
+git fetch "$PUSH_URL" master:refs/remotes/gitee_master 2>&1 | grep -v "$TOKEN"
+git merge -X ours refs/remotes/gitee_master -m "merge 远程变更，本地优先"
+if [ $? -ne 0 ]; then
+    echo "❌ 合并失败，请手动解决后重跑"
+    PUSH_URL=""; TOKEN=""
+    exit 1
+fi
+
+echo "[4/4] 推送到 Gitee..."
 git push "$PUSH_URL" "$(git rev-parse --abbrev-ref HEAD)"
 PUSH_RET=$?
 
