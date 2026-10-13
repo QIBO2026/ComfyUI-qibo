@@ -43,7 +43,7 @@ DEFAULT_CONFIG = {
         }
     },
     "remote_comfyui": {
-        "base_url": "https://c-2051810383756742658.ksai.scnet.cn:58043",
+        "base_url": "",
         "workflow_file": "image_qwen_image_2_1_api.json",
         "verify_ssl": False,
         "poll_interval": 3,
