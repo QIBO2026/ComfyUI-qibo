@@ -27,3 +27,7 @@ nul
 .gitee_tokens.json
 # ModelScope API 令牌本地存储（更新插件不覆盖，禁止提交）
 qibo_tokens.local.json
+# Gitee 推送辅助脚本（开发者本地工具，不发布给插件用户）
+push_gitee.bat
+push_gitee.sh
+gitee_push_helper.py
