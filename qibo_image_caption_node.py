@@ -34,7 +34,7 @@ def _format_token_header(usage, text, label=""):
 from .qibo_auth import (
     load_config, save_config,
     load_api_tokens, save_api_tokens,
-    parse_api_tokens
+    parse_api_tokens, save_tokens_on_success
 )
 from .qibo_image_node import tensor_to_base64_url
 
@@ -125,9 +125,6 @@ class ModelScopeImageCaptionNode:
         if not tokens:
             raise Exception("请提供至少一个有效的API Token\n提示: 使用 ModelScope登录获取Token 节点自动获取Token")
 
-        if api_tokens.strip() not in ["", f"***已保存{len(load_api_tokens())}个Token***"]:
-            if save_api_tokens(tokens):
-                print(f"✅ 已保存 {len(tokens)} 个API Token")
 
         print(f"🔍 开始生成图像描述... 模型: {model} 种子: {seed} 图片数: {len(all_images)}")
 
@@ -164,6 +161,7 @@ class ModelScopeImageCaptionNode:
                 print()
                 description = "".join(description_parts)
                 print(f"\n✅ 第 {i+1} 个Token调用成功! 结果预览: {description[:100]}...")
+                save_tokens_on_success(api_tokens)
                 break
             except Exception as e:
                 last_exception = e

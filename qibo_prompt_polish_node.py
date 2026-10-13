@@ -15,6 +15,7 @@ from .qibo_auth import (
     load_api_tokens,
     save_api_tokens,
     parse_api_tokens,
+    save_tokens_on_success,
 )
 
 
@@ -263,9 +264,6 @@ class QIBOPromptPolishNode:
         if not tokens:
             raise Exception("请提供至少一个有效的API Token\n提示: 使用 ModelScope登录获取Token 节点自动获取Token")
 
-        if api_tokens and api_tokens.strip() not in ["", f"***已保存{len(load_api_tokens())}个Token***"]:
-            if save_api_tokens(tokens):
-                print(f"✅ 已保存 {len(tokens)} 个API Token")
 
         if image_description and image_description.strip():
             print(f"👁️ 收到图片反推描述 ({len(image_description)} 字符): {image_description[:150]}...")
@@ -325,6 +323,7 @@ class QIBOPromptPolishNode:
                     polished = full_response
                 print(f"\n✅ 融合完成! 提示词长度: {len(polished)} 字符")
                 print(f"📋 预览: {polished[:200]}...")
+                save_tokens_on_success(api_tokens)
                 return (polished, full_response)
             except Exception as e:
                 last_exception = e

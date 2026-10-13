@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .qibo_auth import (
     load_config, save_config,
     load_api_tokens, save_api_tokens,
-    parse_api_tokens, get_api_endpoint
+    parse_api_tokens, get_api_endpoint, save_tokens_on_success
 )
 from .qibo_pic_gallery_node import _save_image_and_meta, _load_index_map
 from .qibo_repo_uploader import (
@@ -643,9 +643,6 @@ class ModelScopeImageNode:
         if not tokens:
             raise Exception("请提供至少一个有效的API Token\n提示: 使用 ModelScope登录获取Token 节点自动获取Token")
 
-        if api_tokens and api_tokens.strip() not in ["", "***已保存{}个Token***".format(len(load_api_tokens()))]:
-            if save_api_tokens(tokens):
-                print(f"✅ 已保存 {len(tokens)} 个API Token")
 
         print(f"🔍 开始生成图像... 模型: {model} 尺寸: {width}x{height} 步数: {steps} 引导: {guidance}")
         prompt = _truncate_prompt(prompt)
@@ -751,6 +748,7 @@ class ModelScopeImageNode:
                 image_tensor = torch.from_numpy(image_np)[None,]
 
                 print(f"✅ 第 {i+1} 个Token调用成功，图像生成完成!")
+                save_tokens_on_success(api_tokens)
                 qibodata = {"image": image_tensor, "prompt": prompt, "model": model, "ref_images": None}
                 return (image_tensor, qibodata)
 
@@ -834,9 +832,6 @@ class ModelScopeImageEditNode:
             raise Exception("请提供至少一个有效的API Token\n提示: 使用 ModelScope登录获取Token 节点自动获取Token")
         prompt = _truncate_prompt(prompt)
 
-        if api_tokens and api_tokens.strip() not in ["", "***已保存{}个Token***".format(len(load_api_tokens()))]:
-            if save_api_tokens(tokens):
-                print(f"✅ 已保存 {len(tokens)} 个API Token")
 
         model = gen_model if image_gen_mode else edit_model
         mode = "图生图模式" if image_gen_mode else "图像编辑模式"
@@ -999,6 +994,7 @@ class ModelScopeImageEditNode:
                         except: pass
 
                 print(f"✅ 第 {i+1} 个Token调用成功，图像编辑完成!")
+                save_tokens_on_success(api_tokens)
                 ref_tensor = _pils_to_batch(compressed_pils)
                 qibodata = {"image": image_tensor, "prompt": prompt, "model": model, "ref_images": ref_tensor}
                 return (image_tensor, qibodata)
@@ -1564,6 +1560,7 @@ class QIBOBatchImageEditNode:
                 return (empty, {"image": empty, "prompt": "", "model": edit_model, "ref_images": torch.zeros((0, 64, 64, 3), dtype=torch.float32)})
             cached_upload = (all_urls, all_pils)
             print(f"📦 预上传完成, 开始批量生成...", flush=True)
+            save_tokens_on_success(api_tokens)
             return self._batch_from_json(spec, images_list, prompt, negative_prompt,
                                          edit_model, width, height, steps, guidance, seed,
                                          tokens, config, cached_upload=cached_upload, seq_nums=seq_nums)
@@ -1575,6 +1572,7 @@ class QIBOBatchImageEditNode:
             port_nums=batch_port_nums)
         ref_tensor = _pils_to_batch(ref_pils)
         qibodata = {"image": image_tensor, "prompt": prompt, "model": edit_model, "ref_images": ref_tensor}
+        save_tokens_on_success(api_tokens)
         return (image_tensor, qibodata)
 
     def _batch_from_json(self, spec, images_list, prompt, negative_prompt,

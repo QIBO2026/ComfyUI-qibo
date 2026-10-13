@@ -15,7 +15,7 @@ except ImportError:
 from .qibo_auth import (
     load_config, save_config,
     load_api_tokens, save_api_tokens,
-    parse_api_tokens
+    parse_api_tokens, save_tokens_on_success
 )
 
 
@@ -164,9 +164,6 @@ class ModelScopeTextNode:
         if not tokens:
             raise Exception("请提供至少一个有效的API Token\n提示: 使用 ModelScope登录获取Token 节点自动获取Token")
 
-        if api_tokens and api_tokens.strip() not in ["", "***已保存{}个Token***".format(len(load_api_tokens()))]:
-            if save_api_tokens(tokens):
-                print(f"✅ 已保存 {len(tokens)} 个API Token")
 
         print(f"💬 开始文本生成... 模型: {model} 温度: {temperature} 种子: {seed}")
 
@@ -207,12 +204,14 @@ class ModelScopeTextNode:
                             full_response += answer_chunk
                             print(answer_chunk, end='', flush=True)
                     print(f"\n✅ 流式生成完成! 答案长度: {len(full_response)} 字符, 思维链长度: {len(full_reasoning)} 字符")
+                    save_tokens_on_success(api_tokens)
                     return (full_response, full_reasoning)
                 else:
                     msg = response.choices[0].message
                     result = getattr(msg, "content", None) or ""
                     reasoning = getattr(msg, "reasoning_content", None) or ""
                     print(f"✅ 文本生成完成! 结果长度: {len(result)} 字符, 思维链长度: {len(reasoning)} 字符")
+                    save_tokens_on_success(api_tokens)
                     return (result, reasoning)
 
             except Exception as e:

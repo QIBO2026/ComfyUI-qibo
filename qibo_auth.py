@@ -179,8 +179,32 @@ def parse_api_tokens(token_input: str) -> List[str]:
     stripped = token_input.strip()
     if stripped.startswith("***已保存") and stripped.endswith("***"):
         return load_api_tokens()
-    tokens = re.split(r'[,;\n]+', token_input)
-    return [token.strip() for token in tokens if token.strip()]
+    tokens = [token.strip() for token in re.split(r'[,;\n]+', token_input) if token.strip()]
+    if not tokens:
+        return load_api_tokens()
+    return tokens
+
+
+def save_tokens_on_success(api_tokens_input: str) -> None:
+    """执行成功后持久化 token。
+
+    规则（对应 qibo_tokens.local.json 不上传/不覆盖、不存在时由用户输入保存）：
+    - 占位符/空 → 不保存（用户未主动输入明文）
+    - 本地已有 token → 不保存（不覆盖已持久化内容，更新请用登录节点）
+    - 本地无 token 且用户输入了明文 → 保存（支持多个，逗号/分号/换行分隔）
+    """
+    if not api_tokens_input:
+        return
+    stripped = api_tokens_input.strip()
+    if not stripped or (stripped.startswith("***已保存") and stripped.endswith("***")):
+        return
+    if load_api_tokens():
+        return
+    tokens = [t.strip() for t in re.split(r'[,;\n]+', api_tokens_input) if t.strip()]
+    if not tokens:
+        return
+    if save_api_tokens(tokens):
+        print(f"✅ 执行成功，已保存 {len(tokens)} 个API Token 到本地（后续无需重复输入）")
 
 
 def save_single_api_token(token: str) -> bool:
