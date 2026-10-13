@@ -31,3 +31,5 @@ qibo_tokens.local.json
 push_gitee.bat
 push_gitee.sh
 gitee_push_helper.py
+# 仓库上传 MD5 缓存（本地运行产物，不发布）
+qibo_ref_md5_cache.json
