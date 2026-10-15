@@ -2,7 +2,8 @@ class QIBOShowTextNode:
     """文本显示节点。
 
     text 为 forceInput 输入端口（不在节点上画原生 widget，避免被连线移除）。
-    前端用 addDOMWidget 画一个只读 textarea 始终可见，执行后把接收到的文本写入该 textarea。
+    前端用 ComfyWidgets.STRING 画一个只读 multiline widget 始终可见，
+    执行后把接收到的文本写入该 widget。
     """
 
     @classmethod

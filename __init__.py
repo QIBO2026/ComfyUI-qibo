@@ -94,6 +94,17 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
 }
 
+try:
+    from .qibo_loop_node import get_loop_node_mappings, QIBOLoopContainer
+    _loop_cls_map, _loop_disp_map = get_loop_node_mappings()
+    NODE_CLASS_MAPPINGS.update(_loop_cls_map)
+    NODE_DISPLAY_NAME_MAPPINGS.update(_loop_disp_map)
+    NODE_CLASS_MAPPINGS["QIBOLoopContainer"] = QIBOLoopContainer
+    NODE_DISPLAY_NAME_MAPPINGS["QIBOLoopContainer"] = "QIBO 循环（视觉合并）"
+    print(f"✅ QIBO 循环节点已注册 ({len(_loop_cls_map) + 1} 个)")
+except Exception as e:
+    print(f"⚠️ QIBO 循环节点注册失败: {e}")
+
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']
 
 WEB_DIRECTORY = "./js"

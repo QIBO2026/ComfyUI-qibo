@@ -1336,20 +1336,6 @@ app.registerExtension({
                 self.setDirtyCanvas(true, true);
             };
 
-            self.__qiboRestartComfyUI = async () => {
-                if (!confirm("确认重启 ComfyUI？\n\n将获取当前启动参数并重新启动，当前进程会退出。\n未保存的工作流请先保存。")) return;
-                widget.value = "🔄 重启 ComfyUI 中...\n\n获取启动参数并启动新进程...";
-                self.setDirtyCanvas(true, true);
-                try {
-                    const res = await fetchJson("/qibo/restart_comfyui", { method: "POST" });
-                    if (res.__error) { widget.value = `❌ ${res.__error}`; self.setDirtyCanvas(true, true); return; }
-                    if (res.error) { widget.value = `❌ ${res.error}`; self.setDirtyCanvas(true, true); return; }
-                    widget.value = `✅ ${res.msg || "新进程已启动"}\n\n⏳ 请等待几秒后刷新页面连接新进程...`;
-                } catch (e) {
-                    widget.value = `🔄 重启 ComfyUI\n\n❌ 异常: ${e}`;
-                }
-                self.setDirtyCanvas(true, true);
-            };
 
             self.__qiboSaveManifest = async () => {
                 let logLines = ["💾 保存模型清单（当前工作流用到的所有模型）", ""];
@@ -1587,9 +1573,7 @@ app.registerExtension({
                 ["恢复模型下载", () => self.__qiboRestoreDownload()],
                 ["终端打印清单", () => self.__qiboPrintManifest()],
             ]);
-            makeBtnRow([
-                ["重启 ComfyUI", () => self.__qiboRestartComfyUI()],
-            ]);
+
 
             return result;
         };
