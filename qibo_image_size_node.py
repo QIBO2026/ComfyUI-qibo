@@ -16,13 +16,13 @@ class QIBOImageSizeNode:
         }
 
     RETURN_TYPES = ("INT", "INT")
-    RETURN_NAMES = ("height", "width")
+    RETURN_NAMES = ("width", "height")
     FUNCTION = "get_size"
     CATEGORY = "QIBO_API"
 
     def get_size(self, image):
         _, h, w, _ = image.shape
-        return (int(h), int(w))
+        return (int(w), int(h))
 
 
 NODE_CLASS_MAPPINGS = {
