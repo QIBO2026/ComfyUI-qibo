@@ -183,10 +183,10 @@ function ensureQiboStyles() {
     const s = document.createElement("style");
     s.id = QIBO_STYLE_ID;
     s.textContent = `
-.qibo-main { width:100% !important; min-width:722px !important; height:100%; display:flex !important; flex-direction:row; gap:6px; font-family:${FONT_CSS}; font-size:12px; background:transparent; overflow:hidden; }
+.qibo-main { width:100% !important; min-width:942px !important; height:100%; display:flex !important; flex-direction:row; gap:6px; font-family:${FONT_CSS}; font-size:12px; background:transparent; overflow:hidden; }
 .qibo-left { flex:0 0 270px !important; width:270px !important; min-width:270px !important; max-width:270px !important; height:100%; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
 .qibo-mid { flex:0 0 220px !important; width:220px !important; min-width:220px !important; max-width:220px !important; height:100%; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
-.qibo-right { flex:0 0 220px !important; width:220px !important; min-width:220px !important; max-width:220px !important; height:100%; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
+.qibo-right { flex:0 0 440px !important; width:440px !important; min-width:440px !important; max-width:440px !important; height:100%; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
 .qibo-label { color:${COL_DIM}; font-size:11px; font-weight:500; flex-shrink:0; }
 .qibo-textarea { background:${COL_BG}; color:${COL_FG}; border:1px solid ${COL_BORDER}; border-radius:4px; padding:6px 8px; font-size:12px; font-family:inherit; outline:none; line-height:1.4; }
 .qibo-select { background:${COL_BG}; color:${COL_FG}; border:1px solid ${COL_BORDER}; border-radius:4px; padding:4px 6px; font-size:12px; flex-shrink:0; outline:none; }
@@ -212,9 +212,9 @@ app.registerExtension({
 
             const self = this;
             if (typeof this.setSize === "function") {
-                this.setSize([740, 560]);
+                this.setSize([942, 560]);
             } else {
-                this.size = [740, 560];
+                this.size = [942, 560];
             }
 
             // === Build three-column DOM ===
@@ -328,7 +328,7 @@ app.registerExtension({
             try {
                 const domWidget = this.addDOMWidget("qibo_main", "div", mainContainer, { serialize: false });
                 if (domWidget) {
-                    domWidget.computeSize = () => [740, 620];
+                    domWidget.computeSize = () => [942, 620];
                     console.log("[QIBO] addDOMWidget ok, computeSize set");
                 } else {
                     console.warn("[QIBO] addDOMWidget returned undefined/null");
