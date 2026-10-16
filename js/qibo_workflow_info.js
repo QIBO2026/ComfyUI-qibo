@@ -357,6 +357,36 @@ app.registerExtension({
                 console.warn("[QIBO] manifest widget add failed:", e);
             }
 
+            // === Persistent cache for repo textarea (saves with workflow) ===
+            let repoUrlCacheWidget = null;
+            try {
+                repoUrlCacheWidget = this.addWidget("text", "repo_url_cache", (repoTextarea.value || DEFAULT_REPO_URL), () => {}, { multiline: true });
+                if (repoUrlCacheWidget) {
+                    if (repoUrlCacheWidget.inputEl) repoUrlCacheWidget.inputEl.style.display = "none";
+                    if (repoUrlCacheWidget.element) repoUrlCacheWidget.element.style.display = "none";
+                    repoUrlCacheWidget.options = repoUrlCacheWidget.options || {};
+                    repoUrlCacheWidget.options.hidden = true;
+                    repoUrlCacheWidget.hidden = true;
+                    repoUrlCacheWidget.computeSize = () => [0, 0];
+                    repoUrlCacheWidget.h = 0;
+                    repoUrlCacheWidget.w = 0;
+                }
+            } catch (e) {
+                console.warn("[QIBO] repo_url_cache widget add failed:", e);
+            }
+            repoTextarea.addEventListener("input", () => {
+                if (repoUrlCacheWidget) repoUrlCacheWidget.value = repoTextarea.value;
+            });
+            const _origConfigure = this.onConfigure;
+            this.onConfigure = function (o) {
+                if (_origConfigure) _origConfigure.call(this, o);
+                try {
+                    if (repoUrlCacheWidget && repoUrlCacheWidget.value) {
+                        repoTextarea.value = repoUrlCacheWidget.value;
+                    }
+                } catch (e) {}
+            };
+
             // === Create widget wrappers (same interface as before) ===
             const widget = wrapTextarea(midTextarea, true);
             const msRepoWidget = wrapTextarea(repoTextarea, false);
