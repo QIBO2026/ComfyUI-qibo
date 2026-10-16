@@ -50,5 +50,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "QIBONumberDisplayNode": "QIBO 任何值输入",
+    "QIBONumberDisplayNode": "qibo 显示任何值",
 }

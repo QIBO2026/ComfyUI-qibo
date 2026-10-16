@@ -183,10 +183,10 @@ function ensureQiboStyles() {
     const s = document.createElement("style");
     s.id = QIBO_STYLE_ID;
     s.textContent = `
-.qibo-main { width:100%; height:100%; display:flex; flex-direction:row; gap:6px; font-family:${FONT_CSS}; font-size:12px; background:transparent; overflow:hidden; }
-.qibo-left { flex:0 0 270px; height:100%; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
-.qibo-mid { flex:1 1 0; height:100%; display:flex; flex-direction:column; gap:4px; min-width:0; }
-.qibo-right { flex:1 1 0; height:100%; display:flex; flex-direction:column; gap:4px; min-width:0; }
+.qibo-main { width:100% !important; min-width:722px !important; height:100%; display:flex !important; flex-direction:row; gap:6px; font-family:${FONT_CSS}; font-size:12px; background:transparent; overflow:hidden; }
+.qibo-left { flex:0 0 270px !important; width:270px !important; min-width:270px !important; max-width:270px !important; height:100%; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
+.qibo-mid { flex:0 0 220px !important; width:220px !important; min-width:220px !important; max-width:220px !important; height:100%; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
+.qibo-right { flex:0 0 220px !important; width:220px !important; min-width:220px !important; max-width:220px !important; height:100%; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
 .qibo-label { color:${COL_DIM}; font-size:11px; font-weight:500; flex-shrink:0; }
 .qibo-textarea { background:${COL_BG}; color:${COL_FG}; border:1px solid ${COL_BORDER}; border-radius:4px; padding:6px 8px; font-size:12px; font-family:inherit; outline:none; line-height:1.4; }
 .qibo-select { background:${COL_BG}; color:${COL_FG}; border:1px solid ${COL_BORDER}; border-radius:4px; padding:4px 6px; font-size:12px; flex-shrink:0; outline:none; }
@@ -212,9 +212,9 @@ app.registerExtension({
 
             const self = this;
             if (typeof this.setSize === "function") {
-                this.setSize([640, 560]);
+                this.setSize([740, 560]);
             } else {
-                this.size = [640, 560];
+                this.size = [740, 560];
             }
 
             // === Build three-column DOM ===
@@ -328,7 +328,7 @@ app.registerExtension({
             try {
                 const domWidget = this.addDOMWidget("qibo_main", "div", mainContainer, { serialize: false });
                 if (domWidget) {
-                    domWidget.computeSize = () => [640, 620];
+                    domWidget.computeSize = () => [740, 620];
                     console.log("[QIBO] addDOMWidget ok, computeSize set");
                 } else {
                     console.warn("[QIBO] addDOMWidget returned undefined/null");
@@ -379,59 +379,185 @@ app.registerExtension({
             };
 
             // === Functions ===
+            const renderFilesInRightPanel = (allFiles, emptyText) => {
+                const content = fileListContainer;
+                content.innerHTML = "";
+                if (!allFiles || allFiles.length === 0) {
+                    const empty = document.createElement("div");
+                    empty.style.cssText = `color:${COL_DIM};padding:16px;font-size:13px;`;
+                    empty.textContent = emptyText || "(无文件)";
+                    content.appendChild(empty);
+                    return;
+                }
+                let existCount = 0;
+                for (const f of allFiles) if (f.local_exists) existCount++;
+                const headerRow = document.createElement("div");
+                headerRow.style.cssText = `display:flex;align-items:center;gap:10px;padding:8px 15px;border-bottom:1px solid ${COL_BORDER};background:#252526;`;
+                const selectAllCb = document.createElement("input");
+                selectAllCb.type = "checkbox";
+                selectAllCb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
+                selectAllCb.onchange = () => {
+                    selectAllCb.style.background = selectAllCb.checked ? "#007acc" : "transparent";
+                    content.querySelectorAll(".qibo-file-cb").forEach(cb => { cb.checked = selectAllCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; });
+                };
+                const selectAllLabel = document.createElement("label");
+                selectAllLabel.style.cssText = `cursor:pointer;color:${COL_FG};flex:1;font-size:13px;`;
+                selectAllLabel.textContent = `全选/取消 (${allFiles.length} 个文件)`;
+                const existBadge = document.createElement("span");
+                existBadge.style.cssText = `color:#4caf50;font-size:12px;${existCount ? "" : "display:none;"}`;
+                existBadge.textContent = `${existCount} 个已存在`;
+                headerRow.appendChild(selectAllCb);
+                headerRow.appendChild(selectAllLabel);
+                headerRow.appendChild(existBadge);
+                content.appendChild(headerRow);
+                let byFolder = {};
+                for (let i = 0; i < allFiles.length; i++) {
+                    const f = allFiles[i];
+                    const folder = f.local_folder || "(未匹配)";
+                    if (!byFolder[folder]) byFolder[folder] = [];
+                    byFolder[folder].push(i);
+                }
+                for (const folder of Object.keys(byFolder)) {
+                    const folderEl = document.createElement("div");
+                    folderEl.style.cssText = "margin-bottom:2px;";
+                    const folderHeader = document.createElement("div");
+                    folderHeader.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 15px;cursor:pointer;user-select:none;font-weight:500;font-size:13px;";
+                    const folderIcon = document.createElement("span");
+                    folderIcon.style.cssText = "color:#dcb67a;font-size:12px;";
+                    folderIcon.textContent = "▼";
+                    const groupCb = document.createElement("input");
+                    groupCb.type = "checkbox";
+                    groupCb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
+                    groupCb.onclick = (e) => e.stopPropagation();
+                    const folderContent = document.createElement("div");
+                    folderContent.style.cssText = "display:flex;flex-direction:column;";
+                    groupCb.onchange = () => {
+                        groupCb.style.background = groupCb.checked ? "#007acc" : "transparent";
+                        for (const idx of byFolder[folder]) { const cb = content.querySelector(`.qibo-file-cb[data-idx="${idx}"]`); if (cb) { cb.checked = groupCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; } }
+                    };
+                    const folderLabel = document.createElement("span");
+                    folderLabel.style.cssText = "color:#dcb67a;";
+                    const folderExist = byFolder[folder].filter(i => allFiles[i].local_exists).length;
+                    folderLabel.textContent = `${folder} (${byFolder[folder].length}${folderExist ? `, ${folderExist} 已存在` : ""})`;
+                    folderHeader.appendChild(folderIcon);
+                    folderHeader.appendChild(groupCb);
+                    folderHeader.appendChild(folderLabel);
+                    folderHeader.onmouseover = () => { folderHeader.style.background = "#2a2d2e"; };
+                    folderHeader.onmouseout = () => { folderHeader.style.background = "transparent"; };
+                    let collapsed = false;
+                    folderHeader.onclick = (e) => { if (e.target.tagName === "INPUT") return; collapsed = !collapsed; folderIcon.textContent = collapsed ? "▶" : "▼"; folderContent.style.display = collapsed ? "none" : "flex"; };
+                    folderEl.appendChild(folderHeader);
+                    for (const i of byFolder[folder]) {
+                        const f = allFiles[i];
+                        const itemEl = document.createElement("div");
+                        itemEl.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:6px 15px 6px 35px;font-size:13px;cursor:pointer;";
+                        itemEl.onmouseover = () => { itemEl.style.background = "#2a2d2e"; };
+                        itemEl.onmouseout = () => { itemEl.style.background = "transparent"; };
+                        const itemInfo = document.createElement("div");
+                        itemInfo.style.cssText = "display:flex;align-items:center;gap:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+                        const cb = document.createElement("input");
+                        cb.type = "checkbox";
+                        cb.className = "qibo-file-cb";
+                        cb.dataset.idx = String(i);
+                        cb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
+                        cb.onclick = (e) => e.stopPropagation();
+                        cb.onchange = () => { cb.style.background = cb.checked ? "#007acc" : "transparent"; };
+                        const nameSpan = document.createElement("span");
+                        nameSpan.style.cssText = `overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${f.local_exists ? "#858585" : "#cccccc"};`;
+                        nameSpan.textContent = f.name;
+                        itemInfo.appendChild(cb);
+                        itemInfo.appendChild(nameSpan);
+                        const itemRight = document.createElement("div");
+                        itemRight.style.cssText = "display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:10px;";
+                        const sizeSpan = document.createElement("span");
+                        sizeSpan.style.cssText = `color:${COL_DIM};font-size:12px;`;
+                        sizeSpan.textContent = fmtSize(f.size);
+                        itemRight.appendChild(sizeSpan);
+                        if (f.local_exists) { const checkIcon = document.createElement("span"); checkIcon.style.cssText = "color:#4caf50;font-size:14px;"; checkIcon.textContent = "✓"; itemRight.appendChild(checkIcon); }
+                        itemEl.appendChild(itemInfo);
+                        itemEl.appendChild(itemRight);
+                        itemEl.onclick = (e) => { if (e.target.tagName === "INPUT") return; cb.checked = !cb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; };
+                        folderContent.appendChild(itemEl);
+                    }
+                    folderEl.appendChild(folderContent);
+                    content.appendChild(folderEl);
+                }
+            };
+
+            const detectAndMatch = async () => {
+                const collected = collectGraphNodes();
+                const r = await fetch("/qibo/workflow_check", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ nodes: collected.out }),
+                });
+                if (!r.ok) return { error: `检测失败: HTTP ${r.status}` };
+                const res = await r.json();
+                const missModels = (res.missing_models || []).filter(m => m.status === "missing");
+                const seen = new Set();
+                const uniqMiss = [];
+                for (const m of missModels) { if (!seen.has(m.value)) { seen.add(m.value); uniqMiss.push(m); } }
+                if (uniqMiss.length > 0) {
+                    msFnWidget.options.values = uniqMiss.map(m => m.value);
+                    self.__qiboMissingModels = uniqMiss.map(m => ({ value: m.value, folder: m.folder }));
+                    msFnWidget.value = uniqMiss[0].value;
+                    if (uniqMiss[0].folder) msFolderWidget.value = uniqMiss[0].folder;
+                }
+                const rawUrls = parseRepoUrls(msRepoWidget.value || "");
+                let allFiles = [];
+                let repoErrors = [];
+                for (const repoUrl of rawUrls) {
+                    try {
+                        const lr = await fetch("/qibo/modelscope/list_files", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ url: repoUrl }),
+                        });
+                        if (!lr.ok) { repoErrors.push(`${repoUrl}: HTTP ${lr.status}`); continue; }
+                        const lres = await lr.json();
+                        if (lres.error) { repoErrors.push(`${repoUrl}: ${lres.error}`); continue; }
+                        for (const f of (lres.files || [])) f._repo = lres.model_id || repoUrl;
+                        allFiles = allFiles.concat(lres.files || []);
+                    } catch (e) { repoErrors.push(`${repoUrl}: ${e}`); }
+                }
+                let matched = [];
+                let unmatched = [];
+                for (const m of uniqMiss) {
+                    let f = allFiles.find(x => x.name === m.value);
+                    if (!f) f = allFiles.find(x => x.name.includes(m.value) || m.value.includes(x.name));
+                    if (f) { if (!f.local_folder && m.folder) f.local_folder = m.folder; matched.push(f); }
+                    else unmatched.push(m.value);
+                }
+                self.__qiboMatchedFiles = matched;
+                self.__qiboRepoFiles = matched;
+                renderFilesInRightPanel(matched, "(未匹配到任何缺失模型)");
+                return { res, uniqMiss, matched, unmatched, repoErrors, allFiles };
+            };
+
             self.__qiboDetect = async () => {
                 const diag = [];
                 try {
-                    const collected = collectGraphNodes();
-                    const body = { nodes: collected.out };
-                    diag.push("=== 前端收集 ===");
-                    diag.push("graph 探测:");
-                    for (const p of collected.probe) diag.push("  " + p);
-                    diag.push(`选中路径: ${collected.usedPath || "(无)"}`);
-                    diag.push(`数组长度: ${collected.total}, 跳过无type: ${collected.skippedNoType}, 跳过bypass: ${collected.skippedBypass}`);
-                    diag.push(`有效节点数: ${collected.types.length}`);
-                    diag.push(`类型列表: ${collected.types.join(", ") || "(空)"}`);
-                    const payloadStr = JSON.stringify(body);
-                    diag.push(`payload 大小: ${payloadStr.length} bytes`);
+                    diag.push("=== 检测缺失并匹配 ===");
                     widget.value = diag.join("\n") + "\n\n检测中...";
                     self.setDirtyCanvas(true, true);
-
-                    const r = await fetch("/qibo/workflow_check", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: payloadStr,
-                    });
-                    diag.push(`HTTP 状态: ${r.status} ${r.statusText}`);
-                    if (!r.ok) {
-                        const txt = await r.text();
-                        widget.value = diag.join("\n") + `\n\n❌ 请求失败: ${r.status}\n${txt.slice(0, 500)}`;
+                    const result = await detectAndMatch();
+                    if (result.error) {
+                        widget.value = diag.join("\n") + "\n\n❌ " + result.error;
                         self.setDirtyCanvas(true, true);
                         return;
                     }
-                    const res = await r.json();
-                    diag.push(`后端已注册节点数: ${res.registered_node_count ?? "?"}`);
-                    diag.push(`后端收到节点数: ${res.received_node_count ?? "?"}`);
-                    const missModels = (res.missing_models || []).filter(m => m.status === "missing");
-                    if (missModels.length > 0) {
-                        const seen = new Set();
-                        const uniq = [];
-                        const mapList = [];
-                        for (const m of missModels) {
-                            if (seen.has(m.value)) continue;
-                            seen.add(m.value);
-                            uniq.push(m.value);
-                            mapList.push({ value: m.value, folder: m.folder });
-                        }
-                        msFnWidget.options.values = uniq;
-                        self.__qiboMissingModels = mapList;
-                        if (uniq.length > 0) {
-                            msFnWidget.value = uniq[0];
-                            const m0 = mapList[0];
-                            if (m0 && m0.folder) msFolderWidget.value = m0.folder;
-                        }
-                        diag.push(`缺失模型 ${missModels.length} 个，已填入缺失模型名下拉`);
-                    }
-                    widget.value = diag.join("\n") + "\n\n" + formatResult(res);
+                    const { uniqMiss, matched, unmatched, repoErrors } = result;
+                    diag.push(`缺失模型 ${uniqMiss.length} 个:`);
+                    for (const m of uniqMiss) diag.push(`  ❓ ${m.value} [${m.folder || "?"}]`);
+                    diag.push("");
+                    diag.push(`从仓库地址列文件匹配 ${matched.length}/${uniqMiss.length}:`);
+                    for (const f of matched) diag.push(`  ✓ ${f.name}  [${f.local_folder || "?"}]  ${fmtSize(f.size)}`);
+                    for (const u of unmatched) diag.push(`  ❌ ${u}  未找到`);
+                    if (repoErrors.length) { diag.push("", "列文件错误:"); for (const e of repoErrors) diag.push("  " + e); }
+                    diag.push("");
+                    if (matched.length > 0) diag.push(`✅ 右栏已显示 ${matched.length} 个匹配文件，点"2、一键下载缺少"开始下载`);
+                    else diag.push("⚠ 未匹配到，请检查左栏仓库地址");
+                    widget.value = diag.join("\n");
                 } catch (e) {
                     widget.value = (diag.length ? diag.join("\n") + "\n\n" : "") + "❌ 异常: " + e;
                 }
@@ -655,144 +781,7 @@ app.registerExtension({
                 }
 
                 self.__qiboRepoFiles = allFiles;
-                const content = fileListContainer;
-                content.innerHTML = "";
-
-                if (allFiles.length === 0) {
-                    const empty = document.createElement("div");
-                    empty.style.cssText = `color:${COL_DIM};padding:16px;font-size:13px;`;
-                    empty.textContent = errors.length ? errors.join("\n") : "(无文件)";
-                    content.appendChild(empty);
-                } else {
-                    let existCount = 0;
-                    for (const f of allFiles) if (f.local_exists) existCount++;
-
-                    const headerRow = document.createElement("div");
-                    headerRow.style.cssText = `display:flex;align-items:center;gap:10px;padding:8px 15px;border-bottom:1px solid ${COL_BORDER};background:#252526;`;
-                    const selectAllCb = document.createElement("input");
-                    selectAllCb.type = "checkbox";
-                    selectAllCb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
-                    selectAllCb.onchange = () => {
-                        selectAllCb.style.background = selectAllCb.checked ? "#007acc" : "transparent";
-                        content.querySelectorAll(".qibo-file-cb").forEach(cb => {
-                            cb.checked = selectAllCb.checked;
-                            cb.style.background = cb.checked ? "#007acc" : "transparent";
-                        });
-                    };
-                    const selectAllLabel = document.createElement("label");
-                    selectAllLabel.style.cssText = `cursor:pointer;color:${COL_FG};flex:1;font-size:13px;`;
-                    selectAllLabel.textContent = `全选/取消 (${allFiles.length} 个文件)`;
-                    const existBadge = document.createElement("span");
-                    existBadge.style.cssText = `color:#4caf50;font-size:12px;${existCount ? "" : "display:none;"}`;
-                    existBadge.textContent = `${existCount} 个已存在`;
-                    headerRow.appendChild(selectAllCb);
-                    headerRow.appendChild(selectAllLabel);
-                    headerRow.appendChild(existBadge);
-                    content.appendChild(headerRow);
-
-                    let byFolder = {};
-                    for (let i = 0; i < allFiles.length; i++) {
-                        const f = allFiles[i];
-                        const folder = f.local_folder || "(未匹配)";
-                        if (!byFolder[folder]) byFolder[folder] = [];
-                        byFolder[folder].push(i);
-                    }
-
-                    for (const folder of Object.keys(byFolder)) {
-                        const folderEl = document.createElement("div");
-                        folderEl.style.cssText = "margin-bottom:2px;";
-
-                        const folderHeader = document.createElement("div");
-                        folderHeader.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 15px;cursor:pointer;user-select:none;font-weight:500;font-size:13px;";
-                        const folderIcon = document.createElement("span");
-                        folderIcon.style.cssText = "color:#dcb67a;font-size:12px;";
-                        folderIcon.textContent = "▼";
-                        const groupCb = document.createElement("input");
-                        groupCb.type = "checkbox";
-                        groupCb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
-                        groupCb.onclick = (e) => e.stopPropagation();
-                        groupCb.onchange = () => {
-                            groupCb.style.background = groupCb.checked ? "#007acc" : "transparent";
-                            for (const idx of byFolder[folder]) {
-                                const cb = content.querySelector(`.qibo-file-cb[data-idx="${idx}"]`);
-                                if (cb) { cb.checked = groupCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; }
-                            }
-                        };
-                        const folderLabel = document.createElement("span");
-                        folderLabel.style.cssText = "color:#dcb67a;";
-                        const folderExist = byFolder[folder].filter(i => allFiles[i].local_exists).length;
-                        folderLabel.textContent = `${folder} (${byFolder[folder].length}${folderExist ? `, ${folderExist} 已存在` : ""})`;
-                        folderHeader.appendChild(folderIcon);
-                        folderHeader.appendChild(groupCb);
-                        folderHeader.appendChild(folderLabel);
-                        folderHeader.onmouseover = () => { folderHeader.style.background = "#2a2d2e"; };
-                        folderHeader.onmouseout = () => { folderHeader.style.background = "transparent"; };
-                        let collapsed = false;
-                        folderHeader.onclick = (e) => {
-                            if (e.target.tagName === "INPUT") return;
-                            collapsed = !collapsed;
-                            folderIcon.textContent = collapsed ? "▶" : "▼";
-                            folderContent.style.display = collapsed ? "none" : "flex";
-                        };
-                        folderEl.appendChild(folderHeader);
-
-                        const folderContent = document.createElement("div");
-                        folderContent.style.cssText = "display:flex;flex-direction:column;";
-
-                        for (const i of byFolder[folder]) {
-                            const f = allFiles[i];
-                            const itemEl = document.createElement("div");
-                            itemEl.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:6px 15px 6px 35px;font-size:13px;cursor:pointer;";
-                            itemEl.onmouseover = () => { itemEl.style.background = "#2a2d2e"; };
-                            itemEl.onmouseout = () => { itemEl.style.background = "transparent"; };
-
-                            const itemInfo = document.createElement("div");
-                            itemInfo.style.cssText = "display:flex;align-items:center;gap:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
-
-                            const cb = document.createElement("input");
-                            cb.type = "checkbox";
-                            cb.className = "qibo-file-cb";
-                            cb.dataset.idx = String(i);
-                            cb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
-                            cb.onclick = (e) => e.stopPropagation();
-                            cb.onchange = () => { cb.style.background = cb.checked ? "#007acc" : "transparent"; };
-
-                            const nameSpan = document.createElement("span");
-                            nameSpan.style.cssText = `overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${f.local_exists ? "#858585" : "#cccccc"};`;
-                            nameSpan.textContent = f.name;
-
-                            itemInfo.appendChild(cb);
-                            itemInfo.appendChild(nameSpan);
-
-                            const itemRight = document.createElement("div");
-                            itemRight.style.cssText = "display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:10px;";
-
-                            const sizeSpan = document.createElement("span");
-                            sizeSpan.style.cssText = `color:${COL_DIM};font-size:12px;`;
-                            sizeSpan.textContent = fmtSize(f.size);
-                            itemRight.appendChild(sizeSpan);
-
-                            if (f.local_exists) {
-                                const checkIcon = document.createElement("span");
-                                checkIcon.style.cssText = "color:#4caf50;font-size:14px;";
-                                checkIcon.textContent = "✓";
-                                itemRight.appendChild(checkIcon);
-                            }
-
-                            itemEl.appendChild(itemInfo);
-                            itemEl.appendChild(itemRight);
-                            itemEl.onclick = (e) => {
-                                if (e.target.tagName === "INPUT") return;
-                                cb.checked = !cb.checked;
-                                cb.style.background = cb.checked ? "#007acc" : "transparent";
-                            };
-
-                            folderContent.appendChild(itemEl);
-                        }
-                        folderEl.appendChild(folderContent);
-                        content.appendChild(folderEl);
-                    }
-                }
+                renderFilesInRightPanel(allFiles, errors.length ? errors.join("\n") : "(无文件)");
 
                 const lines = [`📋 解析 ${urls.length} 个地址，共 ${allFiles.length} 个文件:`];
                 for (const rn of repoNames) lines.push(`  ✓ ${rn}`);
@@ -930,77 +919,31 @@ app.registerExtension({
             };
 
             self.__qiboAutoDownload = async () => {
-                widget.value = "🔍 一键检测下载缺失\n\n检测工作流缺失模型中...";
+                widget.value = "🔍 一键检测下载缺失\n\n准备中...";
                 self.setDirtyCanvas(true, true);
                 let logLines = ["🔍 一键检测下载缺失", ""];
-
+                const updateWidget = () => { widget.value = logLines.join("\n"); self.setDirtyCanvas(true, true); };
                 try {
-                    const collected = collectGraphNodes();
-                    const r = await fetch("/qibo/workflow_check", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ nodes: collected.out }),
-                    });
-                    if (!r.ok) { widget.value = `❌ 检测失败: ${r.status}`; self.setDirtyCanvas(true, true); return; }
-                    const res = await r.json();
-                    const missModels = (res.missing_models || []).filter(m => m.status === "missing");
-                    const seen = new Set();
-                    const uniqMiss = [];
-                    for (const m of missModels) { if (!seen.has(m.value)) { seen.add(m.value); uniqMiss.push(m); } }
-
-                    if (uniqMiss.length === 0) {
-                        logLines.push("✅ 未检测到缺失模型");
-                        widget.value = logLines.join("\n");
-                        self.setDirtyCanvas(true, true);
-                        return;
+                    let matched = (self.__qiboMatchedFiles && self.__qiboMatchedFiles.length > 0) ? self.__qiboMatchedFiles : null;
+                    if (matched) {
+                        logLines.push(`使用上次检测匹配的 ${matched.length} 个模型`);
+                        updateWidget();
+                    } else {
+                        logLines.push("检测工作流缺失模型中...");
+                        updateWidget();
+                        const result = await detectAndMatch();
+                        if (result.error) { logLines.push("❌ " + result.error); updateWidget(); return; }
+                        matched = result.matched;
+                        logLines.push(`检测到 ${result.uniqMiss.length} 个缺失模型，匹配 ${matched.length} 个:`);
+                        for (const f of matched) logLines.push(`  ✓ ${f.name}  [${f.local_folder || "?"}]  ${fmtSize(f.size)}`);
+                        for (const u of result.unmatched) logLines.push(`  ❌ ${u}  未找到`);
+                        updateWidget();
                     }
-
-                    logLines.push(`检测到 ${uniqMiss.length} 个缺失模型:`);
-                    for (const m of uniqMiss) logLines.push(`  ❓ ${m.value} [${m.folder || "?"}]`);
-                    logLines.push("", "从仓库地址列文件匹配中...");
-                    const updateWidget = () => { widget.value = logLines.join("\n"); self.setDirtyCanvas(true, true); };
-                    updateWidget();
-
-                    const rawUrls = parseRepoUrls(msRepoWidget.value || "");
-                    let allFiles = [];
-                    for (let u = 0; u < rawUrls.length; u++) {
-                        try {
-                            const lr = await fetch("/qibo/modelscope/list_files", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ url: rawUrls[u] }),
-                            });
-                            if (!lr.ok) continue;
-                            const lres = await lr.json();
-                            if (lres.error) continue;
-                            allFiles = allFiles.concat(lres.files || []);
-                        } catch (e) {}
-                    }
-
-                    let matched = [];
-                    let unmatched = [];
-                    for (const m of uniqMiss) {
-                        let f = allFiles.find(f => f.name === m.value);
-                        if (!f) f = allFiles.find(f => f.name.includes(m.value) || m.value.includes(f.name));
-                        if (f) {
-                            if (!f.local_folder && m.folder) f.local_folder = m.folder;
-                            matched.push(f);
-                        } else {
-                            unmatched.push(m.value);
-                        }
-                    }
-
-                    logLines.push("", `匹配 ${matched.length}/${uniqMiss.length} 个缺失模型:`);
-                    for (const f of matched) logLines.push(`  ✓ ${f.name}  [${f.local_folder || "?"}]  ${fmtSize(f.size)}`);
-                    for (const u of unmatched) logLines.push(`  ❌ ${u}  未找到下载地址`);
-                    updateWidget();
-
                     if (matched.length === 0) {
-                        logLines.push("", "❌ 未匹配到任何缺失模型的下载地址");
+                        logLines.push("", "❌ 无匹配模型，请先点\"1、当前流检测缺少\"");
                         updateWidget();
                         return;
                     }
-
                     const localMissing = matched.filter(f => !f.local_exists);
                     const localExist = matched.filter(f => f.local_exists);
                     if (localExist.length > 0) {
@@ -1011,14 +954,12 @@ app.registerExtension({
                         }
                     }
                     if (localMissing.length === 0) {
-                        logLines.push("", "✅ 所有缺失模型已存在本地，无需下载");
+                        logLines.push("", "✅ 所有匹配模型已存在本地，无需下载");
                         updateWidget();
                         return;
                     }
-
                     logLines.push("", `⬇ 开始下载 ${localMissing.length} 个缺失模型...`, "");
                     updateWidget();
-
                     let okCount = 0;
                     for (let i = 0; i < localMissing.length; i++) {
                         const f = localMissing[i];
@@ -1030,23 +971,14 @@ app.registerExtension({
                                 body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder }),
                             });
                             const dres = await dr.json();
-                            if (dres.error) {
-                                logLines.push(`❌ [${i + 1}/${localMissing.length}] ${f.name}: ${dres.error}`);
-                                updateWidget();
-                                continue;
-                            }
-                            if (!dres.task_id) {
-                                logLines.push(`❌ [${i + 1}/${localMissing.length}] ${f.name}: 未返回 task_id`);
-                                updateWidget();
-                                continue;
-                            }
+                            if (dres.error) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${f.name}: ${dres.error}`); updateWidget(); continue; }
+                            if (!dres.task_id) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${f.name}: 未返回 task_id`); updateWidget(); continue; }
                             const taskId = dres.task_id;
                             const destPath = dres.dest_path || "";
                             const lineIdx = logLines.length;
                             logLines.push(`⏳ [${i + 1}/${localMissing.length}] ${f.name}  准备下载...`);
                             if (destPath) logLines.push(`  保存到: ${destPath}`);
                             updateWidget();
-
                             while (true) {
                                 await new Promise(resolve => setTimeout(resolve, 800));
                                 try {
@@ -1056,36 +988,18 @@ app.registerExtension({
                                         body: JSON.stringify({ task_id: taskId }),
                                     });
                                     const pres = await pr.json();
-                                    if (pres.error || pres.status === "error") {
-                                        logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${f.name}: ${pres.error || "失败"}`;
-                                        updateWidget();
-                                        break;
-                                    }
-                                    if (pres.status === "done") {
-                                        okCount++;
-                                        logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${f.name}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`;
-                                        updateWidget();
-                                        appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0 });
-                                        break;
-                                    }
+                                    if (pres.error || pres.status === "error") { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${f.name}: ${pres.error || "失败"}`; updateWidget(); break; }
+                                    if (pres.status === "done") { okCount++; logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${f.name}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`; updateWidget(); appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0 }); break; }
                                     const pct = pres.total > 0 ? pres.percent.toFixed(1) : "?";
                                     const dl = fmtSize(pres.downloaded);
                                     const tot = pres.total > 0 ? fmtSize(pres.total) : "?";
                                     const spd = fmtSize(pres.speed);
                                     logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${f.name}  ${dl}/${tot}  ${pct}%  ${spd}/s`;
                                     updateWidget();
-                                } catch (e2) {
-                                    logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${f.name}: 轮询失败`;
-                                    updateWidget();
-                                    break;
-                                }
+                                } catch (e2) { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${f.name}: 轮询失败`; updateWidget(); break; }
                             }
-                        } catch (e) {
-                            logLines.push(`❌ [${i + 1}/${localMissing.length}] ${f.name}: ${e}`);
-                            updateWidget();
-                        }
+                        } catch (e) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${f.name}: ${e}`); updateWidget(); }
                     }
-
                     logLines.push("", `✅ 下载完成: ${okCount}/${localMissing.length} 成功`);
                     updateWidget();
                 } catch (e) {
