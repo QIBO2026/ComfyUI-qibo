@@ -2,7 +2,7 @@ import { app } from "/scripts/app.js";
 import { ComfyWidgets } from "/scripts/widgets.js";
 
 const NODE_NAME = "QIBONumberDisplayNode";
-const EXT_NAME = "QIBO.NumberDisplayUI";
+const EXT_NAME = "QIBO.AnyValueDisplayUI";
 const WIDGET_NAME = "display";
 
 app.registerExtension({
@@ -22,9 +22,9 @@ app.registerExtension({
                 app
             ).widget;
             widget.inputEl.readOnly = true;
-            widget.inputEl.placeholder = "(等待执行后显示数字)";
+            widget.inputEl.placeholder = "(等待执行后显示文本)";
             widget.serializeValue = async () => "";
-            this.__qiboNumberWidget = widget;
+            this.__qiboValueWidget = widget;
 
             return result;
         };
@@ -33,14 +33,14 @@ app.registerExtension({
         nodeType.prototype.onExecuted = function (message) {
             const result = onExecuted?.apply(this, arguments);
             try {
-                const raw = message?.number;
-                const num = Array.isArray(raw) ? raw[0] : raw;
-                if (num !== undefined && num !== null && this.__qiboNumberWidget) {
-                    this.__qiboNumberWidget.value = String(num);
+                const raw = message?.text;
+                const text = Array.isArray(raw) ? raw[0] : raw;
+                if (typeof text === "string" && this.__qiboValueWidget) {
+                    this.__qiboValueWidget.value = text;
                     this.setDirtyCanvas(true, true);
                 }
             } catch (e) {
-                console.warn("[QIBO.NumberDisplayUI] 回填失败:", e);
+                console.warn("[QIBO.AnyValueDisplayUI] 回填失败:", e);
             }
             return result;
         };

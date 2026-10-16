@@ -1,26 +1,48 @@
 class QIBONumberDisplayNode:
-    """数字输入显示节点。
+    """任何值输入显示节点。
 
-    number 为 FLOAT 输入（可直接在节点上输入，也可连线输入）。
-    执行后把数字显示在只读显示框，并输出该数字。
+    value 为 * 通配类型 forceInput 输入端口，可接 INT/FLOAT/STRING 等任何连线。
+    执行后把值转换成文本，前端用只读 multiline widget 显示。
     """
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "number": ("FLOAT", {"default": 0.0, "min": -1000000000.0, "max": 1000000000.0, "step": 0.01}),
+                "value": ("*", {"forceInput": True}),
             },
         }
 
-    RETURN_TYPES = ("FLOAT",)
-    RETURN_NAMES = ("number",)
-    FUNCTION = "show_number"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("text",)
+    FUNCTION = "show_value"
     CATEGORY = "QIBO_API"
     OUTPUT_NODE = True
 
-    def show_number(self, number=0.0):
-        return {"ui": {"number": [number]}, "result": (number,)}
+    def show_value(self, value=None):
+        text = self._to_text(value)
+        return {"ui": {"text": [text]}, "result": (text,)}
+
+    @staticmethod
+    def _to_text(value):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if hasattr(value, "shape"):
+            try:
+                return f"<{type(value).__name__} shape={tuple(value.shape)}>"
+            except Exception:
+                pass
+        if isinstance(value, dict):
+            try:
+                import json
+                return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+            except Exception:
+                return str(value)
+        if isinstance(value, (list, tuple)):
+            return "\n".join(str(v) for v in value)
+        return str(value)
 
 
 NODE_CLASS_MAPPINGS = {
@@ -28,5 +50,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "QIBONumberDisplayNode": "QIBO 数字显示",
+    "QIBONumberDisplayNode": "QIBO 任何值输入",
 }

@@ -296,12 +296,14 @@ def _check(payload):
 
     missing_node_types = sorted({n["class_type"] for n in required_nodes if not n["registered"]})
     missing_models = [m for m in required_models if m["status"] != "present"]
+    present_models = [m for m in required_models if m["status"] == "present"]
 
     return {
         "required_nodes": required_nodes,
         "required_models": required_models,
         "missing_node_types": missing_node_types,
         "missing_models": missing_models,
+        "present_models": present_models,
         "received_node_count": len(nodes_map),
         "registered_node_count": len(NODE_CLASS_MAPPINGS),
     }

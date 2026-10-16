@@ -1386,17 +1386,27 @@ app.registerExtension({
                             if (!f.local_folder && m.folder) f.local_folder = m.folder;
                             matched.push({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || m.folder || "checkpoints", size: f.size || 0 });
                         } else {
-                            unmatched.push(m.value);
+                            unmatched.push(m);
                         }
                     }
                     logLines.push(`匹配 ${matched.length}/${uniqAll.length} 个:`);
                     for (const m of matched) logLines.push(`  ✓ ${m.name}  [${m.folder}]  ${fmtSize(m.size)}`);
-                    for (const u of unmatched) logLines.push(`  ✗ ${u}  未找到下载地址`);
+                    for (const u of unmatched) logLines.push(`  ✗ ${u.value}  未找到下载地址`);
                     updateWidget();
-                    if (matched.length === 0) { logLines.push("", "❌ 未匹配到任何模型，无法保存清单"); updateWidget(); return; }
+                    if (rawUrls.length === 0 && unmatched.length > 0) {
+                        logLines.push("", "⚠ 左栏“模型地址或者节点地址”输入框为空，无法采集下载地址。");
+                        logLines.push("  请在其中填入魔搭/仓库链接（可多行）后重新点“保存模型清单”来采集匹配。");
+                        updateWidget();
+                    }
+
+                    const allEntries = matched.slice();
+                    for (const u of unmatched) {
+                        allEntries.push({ name: u.value, direct_url: "", folder: u.folder || "checkpoints", size: 0 });
+                    }
+                    if (allEntries.length === 0) { logLines.push("", "❌ 未识别到任何模型，无法保存清单"); updateWidget(); return; }
 
                     const manifest = {
-                        models: matched,
+                        models: allEntries,
                         saved_at: new Date().toISOString(),
                         repo_urls: rawUrls,
                     };
@@ -1405,8 +1415,10 @@ app.registerExtension({
                         manifestWidget.value = manifestStr;
                         self.setDirtyCanvas(true, true);
                     }
-                    logLines.push(`\n✅ 清单已写入工作流 widget: ${matched.length} 个模型（随工作流保存，不覆盖后端累积文件）`);
-                    logLines.push("\n别人打开此工作流后点“恢复模型下载”即可一键下载");
+                    logLines.push(`\n✅ 清单已写入“恢复模型下载”文本框: 共 ${allEntries.length} 个模型（匹配 ${matched.length} / 未匹配 ${unmatched.length}）`);
+                    logLines.push("别人打开此工作流后点“恢复模型下载”即可一键下载");
+                    logLines.push("\n========== 保存的完整数据 ==========");
+                    logLines.push(JSON.stringify(manifest, null, 2));
                     updateWidget();
                 } catch (e) {
                     logLines.push(``, `❌ 异常: ${e}`);
@@ -1437,22 +1449,32 @@ app.registerExtension({
                         updateWidget();
                         return;
                     }
-                    logLines.push(`清单含 ${models.length} 个模型:`);
+                    const noUrlCount = models.filter(m => !m.direct_url).length;
+                    logLines.push(`清单含 ${models.length} 个模型${noUrlCount ? ` (${noUrlCount} 个无地址将跳过)` : ""}:`);
                     for (let i = 0; i < models.length; i++) {
                         const m = models[i];
-                        logLines.push(`  [${i + 1}] ${m.name}`);
+                        const mark = m.direct_url ? "⬇" : "⚠";
+                        logLines.push(`  [${i + 1}] ${mark} ${m.name}`);
                         logLines.push(`      目录: ${m.folder || "checkpoints"}`);
-                        logLines.push(`      地址: ${m.direct_url || "(无)"}`);
+                        logLines.push(`      地址: ${m.direct_url || "(无，需重新保存模型清单采集)"}`);
                         if (m.size) logLines.push(`      大小: ${fmtSize(m.size)}`);
                     }
                     logLines.push("", `⬇ 开始下载 ${models.length} 个模型...`, "");
                     updateWidget();
 
                     let okCount = 0;
+                    let skipCount = 0;
                     for (let i = 0; i < models.length; i++) {
                         const m = models[i];
                         const folder = m.folder || "checkpoints";
                         const lineIdx = logLines.length;
+                        if (!m.direct_url) {
+                            skipCount++;
+                            logLines.push(`⚠ [${i + 1}/${models.length}] ${m.name}  无下载地址，跳过`);
+                            logLines.push(`    → ${folder}  (请先点“保存模型清单”采集地址)`);
+                            updateWidget();
+                            continue;
+                        }
                         logLines.push(`⏳ [${i + 1}/${models.length}] ${m.name}`);
                         logLines.push(`    → ${folder}  准备下载...`);
                         updateWidget();
@@ -1501,7 +1523,7 @@ app.registerExtension({
                             updateWidget();
                         }
                     }
-                    logLines.push("", `✅ 下载完成: ${okCount}/${models.length} 成功`);
+                    logLines.push("", `✅ 下载完成: ${okCount}/${models.length} 成功${skipCount ? `, ${skipCount} 跳过(无地址)` : ""}`);
                     updateWidget();
                 } catch (e) {
                     logLines.push(``, `❌ 异常: ${e}`);
