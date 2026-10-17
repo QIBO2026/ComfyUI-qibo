@@ -211,6 +211,7 @@ app.registerExtension({
             ensureQiboStyles();
 
             const self = this;
+            self.__qiboSelectedIdxs = new Set();
             if (typeof this.setSize === "function") {
                 this.setSize([942, 560]);
             } else {
@@ -426,9 +427,17 @@ app.registerExtension({
                 const selectAllCb = document.createElement("input");
                 selectAllCb.type = "checkbox";
                 selectAllCb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
+                if (self.__qiboSelectedIdxs && allFiles.length > 0 && allFiles.every((_, idx) => self.__qiboSelectedIdxs.has(idx))) {
+                    selectAllCb.checked = true;
+                    selectAllCb.style.background = "#007acc";
+                }
                 selectAllCb.onchange = () => {
                     selectAllCb.style.background = selectAllCb.checked ? "#007acc" : "transparent";
                     content.querySelectorAll(".qibo-file-cb").forEach(cb => { cb.checked = selectAllCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; });
+                    if (self.__qiboSelectedIdxs) {
+                        self.__qiboSelectedIdxs.clear();
+                        if (selectAllCb.checked) { for (let idx = 0; idx < allFiles.length; idx++) self.__qiboSelectedIdxs.add(idx); }
+                    }
                 };
                 const selectAllLabel = document.createElement("label");
                 selectAllLabel.style.cssText = `cursor:pointer;color:${COL_FG};flex:1;font-size:13px;`;
@@ -490,8 +499,12 @@ app.registerExtension({
                         cb.className = "qibo-file-cb";
                         cb.dataset.idx = String(i);
                         cb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
+                        if (self.__qiboSelectedIdxs && self.__qiboSelectedIdxs.has(i)) { cb.checked = true; cb.style.background = "#007acc"; }
                         cb.onclick = (e) => e.stopPropagation();
-                        cb.onchange = () => { cb.style.background = cb.checked ? "#007acc" : "transparent"; };
+                        cb.onchange = () => {
+                            cb.style.background = cb.checked ? "#007acc" : "transparent";
+                            if (self.__qiboSelectedIdxs) { if (cb.checked) self.__qiboSelectedIdxs.add(i); else self.__qiboSelectedIdxs.delete(i); }
+                        };
                         const nameSpan = document.createElement("span");
                         nameSpan.style.cssText = `white-space:nowrap;color:${f.local_exists ? "#858585" : "#cccccc"};`;
                         nameSpan.textContent = f.name;
@@ -596,6 +609,10 @@ app.registerExtension({
                     else unmatched.push(m.value);
                 }
                 self.__qiboMatchedFiles = matched;
+                if (self.__qiboSelectedIdxs) {
+                    self.__qiboSelectedIdxs.clear();
+                    matched.forEach((f, idx) => { if (!f.local_exists) self.__qiboSelectedIdxs.add(idx); });
+                }
                 self.__qiboRepoFiles = matched;
                 renderFilesInRightPanel(matched, "(未匹配到任何缺失模型)");
                 return { res, uniqMiss, matched, unmatched, repoErrors, allFiles };
@@ -847,6 +864,7 @@ app.registerExtension({
                     }
                 }
 
+                if (self.__qiboSelectedIdxs) self.__qiboSelectedIdxs.clear();
                 self.__qiboRepoFiles = allFiles;
                 renderFilesInRightPanel(allFiles, errors.length ? errors.join("\n") : "(无文件)");
 
@@ -857,6 +875,62 @@ app.registerExtension({
                 widget.value = lines.join("\n");
                 self.setDirtyCanvas(true, true);
             };
+
+            const qiboConfirmDownloadList = (items) => new Promise((resolve) => {
+                const overlay = document.createElement("div");
+                overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100000;display:flex;align-items:center;justify-content:center;font-family:" + FONT_CSS + ";";
+                const card = document.createElement("div");
+                card.style.cssText = "background:" + COL_BG + ";border:1px solid " + COL_BORDER + ";border-radius:8px;width:600px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.5);";
+                const title = document.createElement("div");
+                title.style.cssText = "padding:14px 18px;border-bottom:1px solid " + COL_BORDER + ";font-size:14px;font-weight:600;color:" + COL_FG + ";";
+                title.textContent = "确认下载 " + items.length + " 个文件";
+                card.appendChild(title);
+                const listWrap = document.createElement("div");
+                listWrap.style.cssText = "flex:1 1 auto;overflow-y:auto;padding:4px 0;min-height:0;";
+                const totalSize = items.reduce((s, it) => s + (it.size || 0), 0);
+                items.forEach((it, i) => {
+                    const row = document.createElement("div");
+                    row.style.cssText = "display:flex;gap:10px;padding:6px 18px;font-size:12px;color:" + COL_FG + ";align-items:center;";
+                    const idx = document.createElement("span");
+                    idx.style.cssText = "color:" + COL_DIM + ";width:36px;flex-shrink:0;text-align:right;";
+                    idx.textContent = (i + 1) + ".";
+                    const name = document.createElement("span");
+                    name.style.cssText = "flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+                    name.textContent = it.name;
+                    name.title = it.name;
+                    const size = document.createElement("span");
+                    size.style.cssText = "color:" + COL_DIM + ";width:72px;flex-shrink:0;text-align:right;";
+                    size.textContent = fmtSize(it.size || 0);
+                    const path = document.createElement("span");
+                    path.style.cssText = "color:#4caf50;width:220px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+                    const pathText = "models/" + it.folder + "/" + it.name;
+                    path.textContent = pathText;
+                    path.title = pathText;
+                    row.appendChild(idx); row.appendChild(name); row.appendChild(size); row.appendChild(path);
+                    listWrap.appendChild(row);
+                });
+                card.appendChild(listWrap);
+                const summary = document.createElement("div");
+                summary.style.cssText = "padding:8px 18px;color:" + COL_DIM + ";font-size:12px;border-top:1px solid " + COL_BORDER + ";";
+                summary.textContent = "总计 " + items.length + " 个文件，合计 " + fmtSize(totalSize);
+                card.appendChild(summary);
+                const btnRow = document.createElement("div");
+                btnRow.style.cssText = "padding:12px 18px;border-top:1px solid " + COL_BORDER + ";display:flex;justify-content:flex-end;gap:10px;";
+                const cancelBtn = document.createElement("button");
+                cancelBtn.style.cssText = "background:#3e3e42;color:" + COL_FG + ";border:1px solid " + COL_BORDER + ";border-radius:4px;padding:7px 18px;font-size:13px;cursor:pointer;font-family:inherit;";
+                cancelBtn.textContent = "取消";
+                const okBtn = document.createElement("button");
+                okBtn.style.cssText = "background:#007acc;color:#fff;border:none;border-radius:4px;padding:7px 18px;font-size:13px;cursor:pointer;font-family:inherit;";
+                okBtn.textContent = "确定下载";
+                btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+                card.appendChild(btnRow);
+                overlay.appendChild(card);
+                document.body.appendChild(overlay);
+                const close = (val) => { overlay.remove(); resolve(val); };
+                cancelBtn.onclick = () => close(false);
+                okBtn.onclick = () => close(true);
+                overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+            });
 
             self.__qiboBatchDownload = async () => {
                 const files = self.__qiboRepoFiles || [];
@@ -894,6 +968,14 @@ app.registerExtension({
 
                 if (selected.length === 0) {
                     widget.value = "❌ 未选中任何文件，请在右栏列表勾选";
+                    self.setDirtyCanvas(true, true);
+                    return;
+                }
+
+                const dlItems = selected.map(f => ({ name: f.name, size: f.size || 0, folder: f.local_folder || "checkpoints" }));
+                const confirmed = await qiboConfirmDownloadList(dlItems);
+                if (!confirmed) {
+                    widget.value = `已取消：未下载 ${selected.length} 个文件`;
                     self.setDirtyCanvas(true, true);
                     return;
                 }
