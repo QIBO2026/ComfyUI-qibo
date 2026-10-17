@@ -366,9 +366,19 @@ def register_server_routes():
                 ["git", "config", "--global", "--add", "safe.directory", _HERE],
                 capture_output=True,
             )
-            # 主源 Gitee，失败则切备源 GitHub（公开仓库匿名拉取）
+            # detached HEAD 时先切回 master，否则 pull 无分支可合并
+            cur = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=_HERE, capture_output=True, text=True,
+            )
+            if (cur.stdout or "").strip() == "HEAD":
+                subprocess.run(
+                    ["git", "checkout", "master"],
+                    cwd=_HERE, capture_output=True, text=True,
+                )
+            # 主源 Gitee，明确 origin master 不依赖 upstream tracking；失败切备源 GitHub
             proc = subprocess.run(
-                ["git", "pull"],
+                ["git", "pull", "origin", "master"],
                 cwd=_HERE, capture_output=True, text=True, timeout=120,
             )
             if proc.returncode == 0:
