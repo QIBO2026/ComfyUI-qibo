@@ -600,6 +600,39 @@ app.registerExtension({
                         allFiles = allFiles.concat(lres.files || []);
                     } catch (e) { repoErrors.push(`${repoUrl}: ${e}`); }
                 }
+                try {
+                    const tr = await fetch("/qibo/fetch_text", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ url: "https://gitee.com/qq719703856/ComfyUI-qibo/raw/master/url_model.txt" }),
+                    });
+                    if (tr.ok) {
+                        const tjson = await tr.json();
+                        if (tjson.error) { repoErrors.push("url_model.txt: " + tjson.error); }
+                        else {
+                            const listUrls = parseRepoUrls(tjson.text || "");
+                            for (const listUrl of listUrls) {
+                                const mm = listUrl.match(/modelscope\.cn\/datasets\/([^\/]+)\/([^\/]+)\/file\/view\/([^\/]+)\/([^?]+)/);
+                                if (!mm) continue;
+                                const apiUrl = "https://www.modelscope.cn/api/v1/datasets/" + mm[1] + "/" + mm[2] + "/repo?Revision=" + mm[3] + "&FilePath=" + mm[4];
+                                const jr = await fetch(apiUrl);
+                                if (!jr.ok) continue;
+                                const j = await jr.json();
+                                for (const mdl of (j.models || [])) {
+                                    for (const f of (mdl.files || [])) {
+                                        allFiles.push({
+                                            name: f.name,
+                                            size: f.size || 0,
+                                            direct_url: "https://www.modelscope.cn/api/v1/models/" + mdl.model_id + "/repo?Revision=master&FilePath=" + encodeURIComponent(f.path),
+                                            local_exists: false,
+                                            _repo: mdl.model_id,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { repoErrors.push("url_model.txt: " + e); }
                 let matched = [];
                 let unmatched = [];
                 for (const m of uniqMiss) {

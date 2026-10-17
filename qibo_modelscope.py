@@ -451,6 +451,26 @@ def register_server_routes():
             return web.json_response({"error": f"列文件失败: {e}", "files": []})
         return web.json_response({"files": files, "model_id": f"{owner}/{name}"})
 
+    @routes.post("/qibo/fetch_text")
+    async def qibo_fetch_text(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        url = (payload.get("url") or "").strip()
+        if not url:
+            return web.json_response({"error": "url 为空"})
+        try:
+            def _fetch():
+                import urllib.request as _ur
+                req = _ur.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with _ur.urlopen(req, timeout=15) as resp:
+                    return resp.read().decode("utf-8", errors="replace")
+            text = await asyncio.to_thread(_fetch)
+            return web.json_response({"text": text})
+        except Exception as e:
+            return web.json_response({"error": f"获取失败: {e}"})
+
     @routes.post("/qibo/modelscope/batch_download")
     async def ms_batch_download(request):
         try:
