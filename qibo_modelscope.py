@@ -168,12 +168,23 @@ def _download_direct_with_progress(url, dest_path, task_id, timeout=1200):
     try:
         r = _stream_get(url, timeout)
     except Exception as e:
-        with _task_lock:
-            t = _download_tasks.get(task_id)
-            if t:
-                t["status"] = "error"
-                t["error"] = str(e)
-        return
+        if "/resolve/master/" in url and "404" in str(e):
+            try:
+                r = _stream_get(url.replace("/resolve/master/", "/resolve/master/split_files/", 1), timeout)
+            except Exception as e2:
+                with _task_lock:
+                    t = _download_tasks.get(task_id)
+                    if t:
+                        t["status"] = "error"
+                        t["error"] = str(e2)
+                return
+        else:
+            with _task_lock:
+                t = _download_tasks.get(task_id)
+                if t:
+                    t["status"] = "error"
+                    t["error"] = str(e)
+            return
     total = int(r.headers.get("Content-Length", 0))
     done = 0
     start_time = time.time()

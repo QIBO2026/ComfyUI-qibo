@@ -623,7 +623,7 @@ app.registerExtension({
                                         allFiles.push({
                                             name: f.name,
                                             size: f.size || 0,
-                                            direct_url: "https://www.modelscope.cn/api/v1/models/" + mdl.model_id + "/repo?Revision=master&FilePath=" + encodeURIComponent(f.path),
+                                            direct_url: f.download_url,
                                             local_exists: false,
                                             _repo: mdl.model_id,
                                         });
