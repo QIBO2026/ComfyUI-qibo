@@ -416,12 +416,62 @@ def register_server_routes():
                 return cproc
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
-        def _git_pull():
-            # 规避 git dubious ownership（仓库目录属主与运行用户不一致时 git 拒绝操作）
+        _QIBO_GITEE_URL = "https://gitee.com/qq719703856/ComfyUI-qibo.git"
+        _QIBO_GITHUB_URL = "https://github.com/QIBO2026/ComfyUI-qibo.git"
+        def _ensure_git_repo():
+            # 自愈：下载解压安装时无 .git，或 origin 指向错误仓库（如 ComfyUI 主仓库），自动修复为可用 git pull
+            # 返回 (ok: bool, message: str, already_synced: bool)
+            #   already_synced=True 表示已 fetch+reset 对齐远程，无需再 pull（无 .git 初始化场景）
             subprocess.run(
                 ["git", "config", "--global", "--add", "safe.directory", _HERE],
                 capture_output=True,
             )
+            git_dir = os.path.join(_HERE, ".git")
+            if not os.path.exists(git_dir):
+                # 下载解压安装：初始化 git 仓库 + 添加 remote + 对齐到 Gitee master
+                init = _run_git(["init"])
+                if init.returncode != 0:
+                    return False, f"git init 失败: {(init.stderr or '').strip()}", False
+                _run_git(["symbolic-ref", "HEAD", "refs/heads/master"])
+                _run_git(["remote", "remove", "origin"], timeout=30)
+                add = _run_git(["remote", "add", "origin", _QIBO_GITEE_URL])
+                if add.returncode != 0:
+                    return False, f"git remote add 失败: {(add.stderr or '').strip()}", False
+                fetch = _run_git(["fetch", "origin", "master"], timeout=180)
+                if fetch.returncode != 0:
+                    # Gitee fetch 失败试 GitHub
+                    _run_git(["remote", "remove", "origin"], timeout=30)
+                    _run_git(["remote", "add", "origin", _QIBO_GITHUB_URL])
+                    fetch = _run_git(["fetch", "origin", "master"], timeout=180)
+                    if fetch.returncode != 0:
+                        return False, f"git fetch 失败: {(fetch.stderr or '').strip()}", False
+                _run_git(["reset", "--hard", "FETCH_HEAD"])
+                _run_git(["clean", "-fd"])
+                return True, "检测到下载解压安装（无 .git），已自动初始化 git 仓库并同步到远程 master", True
+            # .git 存在：检查 origin 是否指向 ComfyUI-qibo 仓库
+            remote_proc = _run_git(["remote", "get-url", "origin"])
+            origin_url = (remote_proc.stdout or "").strip()
+            if remote_proc.returncode != 0 or "ComfyUI-qibo" not in origin_url:
+                _run_git(["remote", "remove", "origin"], timeout=30)
+                _run_git(["remote", "add", "origin", _QIBO_GITEE_URL])
+                return True, f"已修复 origin remote（原: {origin_url or '无/不存在'} → Gitee ComfyUI-qibo）", False
+            return True, "", False
+        def _git_pull():
+            # 前置自愈：检查 .git 目录与 origin 配置，下载解压安装或 origin 指错时自动修复
+            ok, heal_msg, already_synced = _ensure_git_repo()
+            if not ok:
+                class _FailProc:
+                    returncode = 1
+                    stdout = ""
+                    stderr = heal_msg
+                return _FailProc()
+            if already_synced:
+                # 无 .git 场景已 fetch+reset 对齐远程，无需再 pull
+                class _HealedProc:
+                    returncode = 0
+                    stdout = f"[{heal_msg}]\nAlready up to date."
+                    stderr = ""
+                return _HealedProc()
             # detached HEAD 时先切回 master，否则 pull 无分支可合并
             cur = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -438,13 +488,15 @@ def register_server_routes():
                 cwd=_HERE, capture_output=True, text=True, timeout=120,
             )
             if proc.returncode == 0:
+                if heal_msg:
+                    proc.stdout = f"[{heal_msg}]\n" + (proc.stdout or "")
                 return proc
             gh_proc = subprocess.run(
                 ["git", "pull", "https://github.com/QIBO2026/ComfyUI-qibo.git", "master"],
                 cwd=_HERE, capture_output=True, text=True, timeout=120,
             )
             if gh_proc.returncode == 0:
-                proc.stdout = f"[Gitee 拉取失败，已从 GitHub 备源更新成功]\n原 Gitee 错误: {(proc.stderr or '').strip()}\n" + (gh_proc.stdout or "")
+                proc.stdout = f"[{'; '.join(filter(None, [heal_msg, 'Gitee 拉取失败，已从 GitHub 备源更新成功']))}]\n原 Gitee 错误: {(proc.stderr or '').strip()}\n" + (gh_proc.stdout or "")
                 proc.stderr = gh_proc.stderr
                 proc.returncode = 0
                 return proc
