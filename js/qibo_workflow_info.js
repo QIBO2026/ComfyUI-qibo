@@ -1760,6 +1760,19 @@ app.registerExtension({
                 }
             };
 
+            self.__qiboClearWorkflow = () => {
+                if (!confirm("确定清空当前工作流所有节点？\n\n只保留本 QIBO 节点，其他节点和连线将全部删除。")) return;
+                const graph = app.graph;
+                if (!graph) return;
+                const toRemove = [];
+                for (const n of (graph.nodes || [])) if (n !== self) toRemove.push(n);
+                for (const n of toRemove) { try { graph.remove(n); } catch (e) {} }
+                if (Array.isArray(graph.groups)) graph.groups.length = 0;
+                if (app.canvas) app.canvas.setDirty(true, true);
+                widget.value = "✅ 已清空工作流，仅保留当前节点";
+                self.setDirtyCanvas(true, true);
+            };
+
             // === Wire up buttons ===
             makeBtnRow([
                 ["1、当前流检测缺少", () => self.__qiboDetect()],
@@ -1793,6 +1806,7 @@ app.registerExtension({
             leftCol.appendChild(workflowUrlInput);
             makeBtnRow([
                 ["创建工作流", () => self.__qiboAppendWorkflow()],
+                ["一键清除", () => self.__qiboClearWorkflow()],
             ]);
 
 
