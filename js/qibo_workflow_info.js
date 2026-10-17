@@ -192,7 +192,7 @@ function ensureQiboStyles() {
 .qibo-select { background:${COL_BG}; color:${COL_FG}; border:1px solid ${COL_BORDER}; border-radius:4px; padding:4px 6px; font-size:12px; flex-shrink:0; outline:none; }
 .qibo-btn { background:#2d2d30; color:${COL_FG}; border:1px solid ${COL_BORDER}; border-radius:4px; padding:6px 8px; font-size:12px; cursor:pointer; text-align:left; flex-shrink:0; font-family:inherit; transition:background 0.15s; }
 .qibo-btn:hover { background:#3e3e42; }
-.qibo-filelist { flex:1 1 0; overflow-y:auto; border:1px solid ${COL_BORDER}; border-radius:4px; padding:0; background:${COL_BG}; color:${COL_FG}; font-size:12px; min-height:0; }
+.qibo-filelist { flex:1 1 0; overflow-y:auto; overflow-x:auto; border:1px solid ${COL_BORDER}; border-radius:4px; padding:0; background:${COL_BG}; color:${COL_FG}; font-size:12px; min-height:0; }
 `;
     document.head.appendChild(s);
 }
@@ -460,7 +460,7 @@ app.registerExtension({
                     groupCb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
                     groupCb.onclick = (e) => e.stopPropagation();
                     const folderContent = document.createElement("div");
-                    folderContent.style.cssText = "display:flex;flex-direction:column;";
+                    folderContent.style.cssText = "display:flex;flex-direction:column;min-width:100%;width:max-content;";
                     groupCb.onchange = () => {
                         groupCb.style.background = groupCb.checked ? "#007acc" : "transparent";
                         for (const idx of byFolder[folder]) { const cb = content.querySelector(`.qibo-file-cb[data-idx="${idx}"]`); if (cb) { cb.checked = groupCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; } }
@@ -484,7 +484,7 @@ app.registerExtension({
                         itemEl.onmouseover = () => { itemEl.style.background = "#2a2d2e"; };
                         itemEl.onmouseout = () => { itemEl.style.background = "transparent"; };
                         const itemInfo = document.createElement("div");
-                        itemInfo.style.cssText = "display:flex;align-items:center;gap:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+                        itemInfo.style.cssText = "display:flex;align-items:center;gap:8px;white-space:nowrap;";
                         const cb = document.createElement("input");
                         cb.type = "checkbox";
                         cb.className = "qibo-file-cb";
@@ -493,7 +493,7 @@ app.registerExtension({
                         cb.onclick = (e) => e.stopPropagation();
                         cb.onchange = () => { cb.style.background = cb.checked ? "#007acc" : "transparent"; };
                         const nameSpan = document.createElement("span");
-                        nameSpan.style.cssText = `overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${f.local_exists ? "#858585" : "#cccccc"};`;
+                        nameSpan.style.cssText = `white-space:nowrap;color:${f.local_exists ? "#858585" : "#cccccc"};`;
                         nameSpan.textContent = f.name;
                         itemInfo.appendChild(cb);
                         itemInfo.appendChild(nameSpan);
