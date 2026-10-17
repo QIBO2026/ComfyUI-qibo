@@ -360,6 +360,62 @@ def register_server_routes():
         return web.json_response(_get_install_state())
     @routes.post("/qibo/update_self")
     async def qibo_update_self(request):
+        def _run_git(args, timeout=120):
+            return subprocess.run(
+                ["git"] + args, cwd=_HERE,
+                capture_output=True, text=True, timeout=timeout,
+            )
+        def _force_sync(remote_name, remote_url, branch="master"):
+            # 强制对齐到远程分支，等同重新 clone 但保留 .git；会丢弃本地未提交修改
+            subprocess.run(["git", "merge", "--abort"], cwd=_HERE, capture_output=True, text=True)
+            fetch_args = ["fetch", remote_name, branch]
+            if remote_name not in ("origin", "github"):
+                fetch_args = ["fetch", remote_url, branch]
+            fproc = _run_git(fetch_args, timeout=180)
+            if fproc.returncode != 0:
+                return fproc, "fetch"
+            rproc = _run_git(["reset", "--hard", f"FETCH_HEAD"])
+            if rproc.returncode != 0:
+                return rproc, "reset"
+            _run_git(["clean", "-fd"])
+            return rproc, "ok"
+        def _clone_fallback(remote_url, branch="master"):
+            # 最后兜底：clone 到临时目录，复制全部内容（含 .git）覆盖当前目录
+            import tempfile, shutil
+            tmp = tempfile.mkdtemp(prefix="qibo_clone_")
+            try:
+                cproc = subprocess.run(
+                    ["git", "clone", "--depth", "1", "-b", branch, remote_url, tmp],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if cproc.returncode != 0:
+                    return cproc
+                # 删除临时目录的 .git 配置中可能残留的临时路径引用无影响，直接整体复制
+                for entry in os.listdir(_HERE):
+                    if entry == ".git":
+                        continue
+                    p = os.path.join(_HERE, entry)
+                    try:
+                        if os.path.isdir(p):
+                            shutil.rmtree(p, ignore_errors=True)
+                        else:
+                            os.remove(p)
+                    except Exception:
+                        pass
+                for entry in os.listdir(tmp):
+                    src = os.path.join(tmp, entry)
+                    dst = os.path.join(_HERE, entry)
+                    try:
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst, dirs_exist_ok=True)
+                        else:
+                            shutil.copy2(src, dst)
+                    except Exception:
+                        pass
+                cproc.stdout = (cproc.stdout or "") + "\n[已通过 git clone 兜底重新同步]"
+                return cproc
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
         def _git_pull():
             # 规避 git dubious ownership（仓库目录属主与运行用户不一致时 git 拒绝操作）
             subprocess.run(
@@ -392,8 +448,30 @@ def register_server_routes():
                 proc.stderr = gh_proc.stderr
                 proc.returncode = 0
                 return proc
-            proc.stderr = (proc.stderr or "") + "\n[GitHub 备源也失败]: " + (gh_proc.stderr or "")
-            return proc
+            # 双源 pull 均失败：先清理合并冲突状态，再尝试强制对齐（等同重新 clone）
+            err_msg = (proc.stderr or "") + "\n[GitHub 备源也失败]: " + (gh_proc.stderr or "")
+            sync_proc, sync_stage = _force_sync("origin", "https://gitee.com/qq719703856/ComfyUI-qibo.git")
+            if sync_stage == "ok" and sync_proc.returncode == 0:
+                sync_proc.stdout = f"[双源 pull 均失败，已强制对齐 Gitee origin/master]\n{err_msg}\n" + (sync_proc.stdout or "")
+                sync_proc.stderr = ""
+                sync_proc.returncode = 0
+                return sync_proc
+            # Gitee fetch 失败，尝试 GitHub 强制对齐
+            gh_sync_proc, gh_sync_stage = _force_sync("github", "https://github.com/QIBO2026/ComfyUI-qibo.git")
+            if gh_sync_stage == "ok" and gh_sync_proc.returncode == 0:
+                gh_sync_proc.stdout = f"[双源 pull 均失败，已强制对齐 GitHub master]\n{err_msg}\n" + (gh_sync_proc.stdout or "")
+                gh_sync_proc.stderr = ""
+                gh_sync_proc.returncode = 0
+                return gh_sync_proc
+            # 强制对齐也失败：最后兜底用 git clone 重新克隆覆盖
+            clone_proc = _clone_fallback("https://gitee.com/qq719703856/ComfyUI-qibo.git")
+            if clone_proc.returncode == 0:
+                clone_proc.stdout = f"[双源 pull + 强制对齐均失败，已通过 git clone 重新同步]\n{err_msg}\n" + (clone_proc.stdout or "")
+                clone_proc.stderr = ""
+                clone_proc.returncode = 0
+                return clone_proc
+            clone_proc.stderr = err_msg + "\n[git clone 兜底也失败]: " + (clone_proc.stderr or "")
+            return clone_proc
         try:
             proc = await asyncio.get_running_loop().run_in_executor(None, _git_pull)
             return web.json_response({
