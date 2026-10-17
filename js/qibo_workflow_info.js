@@ -273,12 +273,6 @@ app.registerExtension({
             idSelect.appendChild(idPlaceholder);
             leftCol.appendChild(idSelect);
 
-            leftCol.appendChild(makeLabel("工作流 JSON URL"));
-            const workflowUrlInput = document.createElement("input");
-            workflowUrlInput.type = "text";
-            workflowUrlInput.placeholder = "https://.../workflow.json";
-            workflowUrlInput.style.cssText = "width:100%;box-sizing:border-box;background:" + COL_BG + ";color:" + COL_FG + ";border:1px solid " + COL_BORDER + ";border-radius:4px;padding:6px 8px;font-size:12px;";
-            leftCol.appendChild(workflowUrlInput);
 
             function makeBtn(text, fn, parent) {
                 const btn = document.createElement("button");
@@ -385,12 +379,34 @@ app.registerExtension({
             repoTextarea.addEventListener("input", () => {
                 if (repoUrlCacheWidget) repoUrlCacheWidget.value = repoTextarea.value;
             });
+
+            // === Persistent cache for workflow URL input (saves with workflow) ===
+            let workflowUrlInput = null;
+            let workflowUrlCacheWidget = null;
+            try {
+                workflowUrlCacheWidget = this.addWidget("text", "workflow_url_cache", "", () => {}, {});
+                if (workflowUrlCacheWidget) {
+                    if (workflowUrlCacheWidget.inputEl) workflowUrlCacheWidget.inputEl.style.display = "none";
+                    if (workflowUrlCacheWidget.element) workflowUrlCacheWidget.element.style.display = "none";
+                    workflowUrlCacheWidget.options = workflowUrlCacheWidget.options || {};
+                    workflowUrlCacheWidget.options.hidden = true;
+                    workflowUrlCacheWidget.hidden = true;
+                    workflowUrlCacheWidget.computeSize = () => [0, 0];
+                    workflowUrlCacheWidget.h = 0;
+                    workflowUrlCacheWidget.w = 0;
+                }
+            } catch (e) {
+                console.warn("[QIBO] workflow_url_cache widget add failed:", e);
+            }
             const _origConfigure = this.onConfigure;
             this.onConfigure = function (o) {
                 if (_origConfigure) _origConfigure.call(this, o);
                 try {
                     if (repoUrlCacheWidget && repoUrlCacheWidget.value) {
                         repoTextarea.value = repoUrlCacheWidget.value;
+                    }
+                    if (workflowUrlCacheWidget && workflowUrlCacheWidget.value && workflowUrlInput) {
+                        workflowUrlInput.value = workflowUrlCacheWidget.value;
                     }
                 } catch (e) {}
             };
@@ -1767,6 +1783,14 @@ app.registerExtension({
                 ["恢复模型下载", () => self.__qiboRestoreDownload()],
                 ["终端打印清单", () => self.__qiboPrintManifest()],
             ]);
+            leftCol.appendChild(makeLabel("工作流 JSON URL"));
+            workflowUrlInput = document.createElement("input");
+            workflowUrlInput.type = "text";
+            workflowUrlInput.placeholder = "https://.../workflow.json";
+            workflowUrlInput.style.cssText = "width:100%;box-sizing:border-box;background:" + COL_BG + ";color:" + COL_FG + ";border:1px solid " + COL_BORDER + ";border-radius:4px;padding:6px 8px;font-size:12px;";
+            if (workflowUrlCacheWidget && workflowUrlCacheWidget.value) workflowUrlInput.value = workflowUrlCacheWidget.value;
+            workflowUrlInput.addEventListener("input", () => { if (workflowUrlCacheWidget) workflowUrlCacheWidget.value = workflowUrlInput.value; });
+            leftCol.appendChild(workflowUrlInput);
             makeBtnRow([
                 ["创建工作流", () => self.__qiboAppendWorkflow()],
             ]);
