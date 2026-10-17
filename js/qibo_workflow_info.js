@@ -1715,7 +1715,27 @@ app.registerExtension({
                             if (src && dst) { src.connect(link[2], dst, link[4]); linked++; }
                         } catch (e) {}
                     }
-                    widget.value = "✅ 已追加工作流: " + added + " 个节点, " + linked + " 条连线\n来源: " + url + (logLines.length ? "\n" + logLines.join("\n") : "");
+                    let grouped = 0;
+                    for (const gd of (graphData.groups || [])) {
+                        try {
+                            const GroupCtor = LiteGraph.LGraphGroup || (typeof LGraphGroup !== "undefined" ? LGraphGroup : null);
+                            if (!GroupCtor) continue;
+                            const group = new GroupCtor(gd.title || "Group");
+                            if (Array.isArray(gd.bounding)) {
+                                group.pos = [gd.bounding[0] + offsetX, gd.bounding[1] + offsetY];
+                                group.size = [gd.bounding[2], gd.bounding[3]];
+                            } else {
+                                group.pos = [(gd.pos[0] || 0) + offsetX, (gd.pos[1] || 0) + offsetY];
+                                group.size = gd.size || [400, 200];
+                            }
+                            if (gd.color) group.color = gd.color;
+                            if (gd.font_size) group.font_size = gd.font_size;
+                            graph.add(group);
+                            group.recomputeInsideNodes?.();
+                            grouped++;
+                        } catch (e) {}
+                    }
+                    widget.value = "✅ 已追加工作流: " + added + " 个节点, " + linked + " 条连线, " + grouped + " 个分组\n来源: " + url + (logLines.length ? "\n" + logLines.join("\n") : "");
                     self.setDirtyCanvas(true, true);
                     if (app.canvas) app.canvas.setDirty(true, true);
                 } catch (e) {
