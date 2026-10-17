@@ -273,6 +273,13 @@ app.registerExtension({
             idSelect.appendChild(idPlaceholder);
             leftCol.appendChild(idSelect);
 
+            leftCol.appendChild(makeLabel("工作流 JSON URL"));
+            const workflowUrlInput = document.createElement("input");
+            workflowUrlInput.type = "text";
+            workflowUrlInput.placeholder = "https://.../workflow.json";
+            workflowUrlInput.style.cssText = "width:100%;box-sizing:border-box;background:" + COL_BG + ";color:" + COL_FG + ";border:1px solid " + COL_BORDER + ";border-radius:4px;padding:6px 8px;font-size:12px;";
+            leftCol.appendChild(workflowUrlInput);
+
             function makeBtn(text, fn, parent) {
                 const btn = document.createElement("button");
                 btn.textContent = text;
@@ -1668,6 +1675,55 @@ app.registerExtension({
                 }
             };
 
+            self.__qiboAppendWorkflow = async () => {
+                const url = (workflowUrlInput.value || "").trim();
+                if (!url) { widget.value = "❌ 请输入工作流 JSON URL"; self.setDirtyCanvas(true, true); return; }
+                widget.value = "⏳ 正在获取工作流: " + url;
+                self.setDirtyCanvas(true, true);
+                try {
+                    const r = await fetch("/qibo/fetch_text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+                    const tjson = await r.json();
+                    if (tjson.error) throw new Error(tjson.error);
+                    const graphData = JSON.parse(tjson.text);
+                    if (!graphData || !Array.isArray(graphData.nodes)) throw new Error("URL 内容不是有效工作流 JSON（无 nodes 数组）");
+                    const graph = app.graph;
+                    if (!graph) throw new Error("画布未就绪");
+                    let maxX = 0;
+                    for (const n of (graph.nodes || [])) maxX = Math.max(maxX, (n.pos[0] || 0) + (n.size[0] || 0));
+                    const offsetX = maxX + 200, offsetY = 0;
+                    const idMap = {};
+                    let added = 0;
+                    const logLines = [];
+                    for (const nd of (graphData.nodes || [])) {
+                        try {
+                            const node = LiteGraph.createNode(nd.type);
+                            if (!node) { logLines.push("⚠ 跳过未知节点类型: " + nd.type); continue; }
+                            if (typeof node.configure === "function") node.configure(nd);
+                            node.pos = [(nd.pos[0] || 0) + offsetX, (nd.pos[1] || 0) + offsetY];
+                            const newId = (graph.last_node_id || 0) + 1;
+                            graph.last_node_id = newId;
+                            idMap[nd.id] = node;
+                            node.id = newId;
+                            graph.add(node);
+                            added++;
+                        } catch (e) { logLines.push("⚠ 节点 " + nd.type + " 创建失败: " + e); }
+                    }
+                    let linked = 0;
+                    for (const link of (graphData.links || [])) {
+                        try {
+                            const src = idMap[link[1]], dst = idMap[link[3]];
+                            if (src && dst) { src.connect(link[2], dst, link[4]); linked++; }
+                        } catch (e) {}
+                    }
+                    widget.value = "✅ 已追加工作流: " + added + " 个节点, " + linked + " 条连线\n来源: " + url + (logLines.length ? "\n" + logLines.join("\n") : "");
+                    self.setDirtyCanvas(true, true);
+                    if (app.canvas) app.canvas.setDirty(true, true);
+                } catch (e) {
+                    widget.value = "❌ 创建工作流失败: " + e;
+                    self.setDirtyCanvas(true, true);
+                }
+            };
+
             // === Wire up buttons ===
             makeBtnRow([
                 ["1、当前流检测缺少", () => self.__qiboDetect()],
@@ -1690,6 +1746,9 @@ app.registerExtension({
                 ["保存模型清单", () => self.__qiboSaveManifest()],
                 ["恢复模型下载", () => self.__qiboRestoreDownload()],
                 ["终端打印清单", () => self.__qiboPrintManifest()],
+            ]);
+            makeBtnRow([
+                ["创建工作流", () => self.__qiboAppendWorkflow()],
             ]);
 
 
