@@ -65,14 +65,29 @@ function collectGraphNodes() {
         if (!node.type) { skippedNoType++; continue; }
         if (node.mode === 2) { skippedBypass++; continue; }
         const inputs = {};
+        const fieldHints = {};
         if (node.widgets) {
             for (const w of node.widgets) {
                 if (!w || !w.name) continue;
                 if (w.type === "button") continue;
                 inputs[w.name] = w.value;
+                const hints = [];
+                const tt = w.tooltip || (w.options && w.options.tooltip) || "";
+                if (tt) hints.push(String(tt));
+                try {
+                    const vals = w.options && w.options.values;
+                    if (Array.isArray(vals)) {
+                        for (const v of vals) {
+                            if (typeof v === "string" && (v.includes("请把") || v.includes("放到") || v.includes("models/"))) hints.push(v);
+                        }
+                    }
+                } catch (e) {}
+                if (hints.length > 0) fieldHints[w.name] = hints;
             }
         }
-        out[node.id] = { class_type: node.type, inputs };
+        const entry = { class_type: node.type, inputs };
+        if (Object.keys(fieldHints).length > 0) entry.field_hints = fieldHints;
+        out[node.id] = entry;
         types.push(node.type);
     }
     return { out, types, usedPath, probe, total: nodes.length, skippedNoType, skippedBypass };
@@ -103,14 +118,23 @@ function formatResult(res) {
     for (const m of rms) {
         let mark = "✓", tag = "已就位";
         if (m.status === "missing") { mark = "✗"; tag = "缺失"; }
+        else if (m.status === "placeholder") { mark = "⚠"; tag = "占位提示(文件名未知)"; }
         else if (m.status === "folder_unknown") { mark = "⚠"; tag = "目录未注册"; }
-        lines.push(`  ${mark} [节点${m.node_id}] ${m.class_type}.${m.field} = ${m.value}`);
-        lines.push(`       目录: ${m.folder}  ${tag}`);
+        const dispVal = m.is_placeholder ? (m.orig_value || "") : (m.value || "");
+        lines.push(`  ${mark} [节点${m.node_id}] ${m.class_type}.${m.field} = ${dispVal}`);
+        if (m.is_placeholder) {
+            lines.push(`       本地路径: models/${m.folder}/  ${tag}`);
+        } else {
+            const rel = m.subpath ? `${m.subpath}/${m.value}` : m.value;
+            lines.push(`       本地路径: models/${m.folder}/${rel}  ${tag}`);
+        }
         if (m.status === "missing" && m.available && m.available.length) {
             const shown = m.available.slice(0, 15).join(", ");
             lines.push(`       该目录已有: ${shown}${m.available.length > 15 ? " ..." : ""}`);
         } else if (m.status === "missing") {
             lines.push(`       该目录为空`);
+        } else if (m.status === "placeholder") {
+            lines.push(`       请从右栏候选中选择模型下载到 models/${m.folder}/`);
         }
     }
 
@@ -598,18 +622,19 @@ app.registerExtension({
                 });
                 if (!r.ok) return { error: `检测失败: HTTP ${r.status}` };
                 const res = await r.json();
-                const missModels = (res.missing_models || []).filter(m => m.status === "missing");
+                const missModels = (res.missing_models || []).filter(m => m.status === "missing" || m.status === "placeholder");
                 const seen = new Set();
                 const uniqMiss = [];
                 for (const m of missModels) {
-                    const key = (m.subpath || "") + "/" + m.value;
+                    const key = (m.subpath || "") + "/" + m.value + "|" + (m.folder || "");
                     if (!seen.has(key)) { seen.add(key); uniqMiss.push(m); }
                 }
                 if (uniqMiss.length > 0) {
-                    msFnWidget.options.values = uniqMiss.map(m => m.value);
-                    self.__qiboMissingModels = uniqMiss.map(m => ({ value: m.value, folder: m.folder, subpath: m.subpath || "" }));
-                    msFnWidget.value = uniqMiss[0].value;
-                    if (uniqMiss[0].folder) msFolderWidget.value = uniqMiss[0].folder;
+                    msFnWidget.options.values = uniqMiss.map(m => m.value || m.orig_value || "");
+                    self.__qiboMissingModels = uniqMiss.map(m => ({ value: m.value, folder: m.folder, subpath: m.subpath || "", is_placeholder: !!m.is_placeholder, orig_value: m.orig_value || "" }));
+                    const firstReal = uniqMiss.find(m => !m.is_placeholder) || uniqMiss[0];
+                    msFnWidget.value = firstReal.value || firstReal.orig_value || "";
+                    if (firstReal.folder) msFolderWidget.value = firstReal.folder;
                 }
                 const rawUrls = parseRepoUrls(msRepoWidget.value || "");
                 let allFiles = [];
@@ -663,9 +688,35 @@ app.registerExtension({
                 } catch (e) { repoErrors.push("url_model.txt: " + e); }
                 let matched = [];
                 let unmatched = [];
+                const usedFileSet = new Set();
                 for (const m of uniqMiss) {
                     const wantName = m.value;
                     const wantSub = m.subpath || "";
+                    if (m.is_placeholder) {
+                        const folderLower = (m.folder || "").toLowerCase();
+                        const cands = allFiles.filter(x => {
+                            if (!x.name) return false;
+                            const lf = (x.local_folder || "").toLowerCase();
+                            const key = x.direct_url || (x._repo + "/" + x.name);
+                            if (usedFileSet.has(key)) return false;
+                            if (lf && lf === folderLower) return true;
+
+                            return false;
+                        });
+                        if (cands.length > 0) {
+                            for (const f of cands) {
+                                if (!f.local_folder && m.folder) f.local_folder = m.folder;
+                                f.subpath = "";
+                                f.orig_value = m.orig_value || "";
+                                f.is_placeholder_match = true;
+                                matched.push(f);
+                                usedFileSet.add(f.direct_url || (f._repo + "/" + f.name));
+                            }
+                        } else {
+                            unmatched.push(m.orig_value || `（请把模型放到 models/${m.folder}）`);
+                        }
+                        continue;
+                    }
                     let f = allFiles.find(x => x.name === wantName);
                     if (!f) f = allFiles.find(x => x.name && wantName && (x.name.toLowerCase() === wantName.toLowerCase()));
                     if (!f) f = allFiles.find(x => x.name && wantName && (x.name.includes(wantName) || wantName.includes(x.name)));
@@ -701,14 +752,19 @@ app.registerExtension({
                     const { uniqMiss, matched, unmatched, repoErrors } = result;
                     diag.push(`缺失模型 ${uniqMiss.length} 个:`);
                     for (const m of uniqMiss) {
-                        const full = m.subpath ? `${m.subpath}/${m.value}` : m.value;
-                        diag.push(`  ❓ ${full} [${m.folder || "?"}]`);
+                        if (m.is_placeholder) {
+                            diag.push(`  ⚠ models/${m.folder || "?"}/  (占位提示，文件名未知)`);
+                            diag.push(`     提示: ${m.orig_value || `（请把模型放到 models/${m.folder}）`}`);
+                        } else {
+                            const rel = m.subpath ? `${m.subpath}/${m.value}` : m.value;
+                            diag.push(`  ❓ models/${m.folder || "?"}/${rel}`);
+                        }
                     }
                     diag.push("");
                     diag.push(`从仓库地址列文件匹配 ${matched.length}/${uniqMiss.length}:`);
                     for (const f of matched) {
-                        const full = f.subpath ? `${f.subpath}/${f.name}` : f.name;
-                        diag.push(`  ✓ ${full}  [${f.local_folder || "?"}]  ${fmtSize(f.size)}`);
+                        const rel = f.subpath ? `${f.subpath}/${f.name}` : f.name;
+                        diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}`);
                     }
                     for (const u of unmatched) diag.push(`  ❌ ${u}  未找到`);
                     if (repoErrors.length) { diag.push("", "列文件错误:"); for (const e of repoErrors) diag.push("  " + e); }
@@ -1167,8 +1223,8 @@ app.registerExtension({
                         matched = result.matched;
                         logLines.push(`检测到 ${result.uniqMiss.length} 个缺失模型，匹配 ${matched.length} 个:`);
                         for (const f of matched) {
-                            const full = f.subpath ? `${f.subpath}/${f.name}` : f.name;
-                            logLines.push(`  ✓ ${full}  [${f.local_folder || "?"}]  ${fmtSize(f.size)}`);
+                            const rel = f.subpath ? `${f.subpath}/${f.name}` : f.name;
+                            logLines.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}`);
                         }
                         for (const u of result.unmatched) logLines.push(`  ❌ ${u}  未找到`);
                         updateWidget();
@@ -1503,12 +1559,15 @@ app.registerExtension({
                         body: JSON.stringify({ nodes: collected.out }),
                     });
                     if (res.__error) { logLines.push(`❌ 检测失败: ${res.__error}`); updateWidget(); return; }
-                    const missModels = (res.missing_models || []).filter(m => m.status === "missing");
+                    const missModels = (res.missing_models || []).filter(m => m.status === "missing" || m.status === "placeholder");
                     const presentModels = (res.present_models || []);
                     const allRef = [...missModels, ...presentModels];
                     const seen = new Set();
                     const uniqAll = [];
-                    for (const m of allRef) { if (!seen.has(m.value)) { seen.add(m.value); uniqAll.push(m); } }
+                    for (const m of allRef) {
+                        const key = (m.subpath || "") + "/" + (m.value || "") + "|" + (m.folder || "");
+                        if (!seen.has(key)) { seen.add(key); uniqAll.push(m); }
+                    }
                     if (uniqAll.length === 0) {
                         logLines.push("❌ 未检测到工作流引用的模型");
                         updateWidget();

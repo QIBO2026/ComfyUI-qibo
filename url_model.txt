@@ -1,1 +1,2 @@
 https://www.modelscope.cn/datasets/lanren/fahuo/file/view/master/Comfy-Org_.json?id=217860
+https://www.modelscope.cn/datasets/lanren/fahuo/file/view/master/Qwen3_GGUF.json?id=217860

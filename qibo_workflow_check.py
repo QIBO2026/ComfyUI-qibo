@@ -273,6 +273,27 @@ def _split_subpath(value):
     return subpath, basename
 
 
+import re as _re
+_PLACEHOLDER_RE = _re.compile(r"请把.*?放到.*?models?[/\\]([^\s/\\）)\]\s]+)", _re.IGNORECASE)
+_PLACEHOLDER_RE2 = _re.compile(r"请放到.*?models?[/\\]([^\s/\\）)\]\s]+)", _re.IGNORECASE)
+_PLACEHOLDER_RE3 = _re.compile(r"放到.*?models?[/\\]([^\s/\\）)\]\s]+)", _re.IGNORECASE)
+
+
+def _parse_placeholder_folder(value):
+    """识别 widget 值里的占位提示，如 '（请把模型放到 models/LLM）' -> 'LLM'。
+    返回 folder 名；不匹配返回 None。
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    if "请把" not in value and "请放到" not in value and "放到" not in value:
+        return None
+    for pat in (_PLACEHOLDER_RE, _PLACEHOLDER_RE2, _PLACEHOLDER_RE3):
+        m = pat.search(value)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
 def _list_folder(folder):
     try:
         import folder_paths as fp
@@ -295,10 +316,39 @@ def _check(payload):
         if class_type:
             type_counter[class_type] = type_counter.get(class_type, 0) + 1
         inputs = node.get("inputs", {}) or {}
+        field_hints = node.get("field_hints", {}) or {}
+        node_hint_folder = None
+        for _fn, _hints in field_hints.items():
+            if not isinstance(_hints, list):
+                continue
+            for _h in _hints:
+                _fh = _parse_placeholder_folder(_h)
+                if _fh:
+                    node_hint_folder = _fh
+                    break
+            if node_hint_folder:
+                break
         for k, v in inputs.items():
             if not isinstance(v, str) or not v:
                 continue
+            ph_folder = _parse_placeholder_folder(v)
+            if ph_folder:
+                required_models.append({
+                    "node_id": str(node_id),
+                    "class_type": class_type,
+                    "field": k,
+                    "value": "",
+                    "orig_value": v,
+                    "subpath": "",
+                    "folder": ph_folder,
+                    "is_placeholder": True,
+                })
+                continue
             folder = _resolve_folder(class_type, k)
+            if not folder and node_hint_folder:
+                ext = os.path.splitext(v.lower())[1]
+                if ext in MODEL_EXTENSIONS or "/" in v.replace("\\", "/"):
+                    folder = node_hint_folder
             if not folder:
                 ext = os.path.splitext(v.lower())[1]
                 if ext in MODEL_EXTENSIONS:
@@ -314,6 +364,7 @@ def _check(payload):
                 "orig_value": v,
                 "subpath": subpath,
                 "folder": folder,
+                "is_placeholder": False,
             })
 
     install_map = _load_node_install_map()
@@ -337,6 +388,9 @@ def _check(payload):
             folder_cache[folder] = _list_folder(folder)
         available = folder_cache[folder]
         ref["available"] = available or []
+        if ref.get("is_placeholder"):
+            ref["status"] = "placeholder"
+            continue
         if available is None:
             ref["status"] = "folder_unknown"
         else:
