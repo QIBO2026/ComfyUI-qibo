@@ -226,6 +226,10 @@ def _rife_download_ckpt(ckpt_name):
     for url in all_urls:
         try:
             import requests
+            import urllib.parse as _up
+            _p = _up.urlsplit(url)
+            if (_p.hostname or "").lower() == "huggingface.co":
+                url = _up.urlunsplit(_p._replace(netloc="hf-mirror.com"))
             print(f"[QIBO-RIFE] 下载 {ckpt_name} from {url}")
             r = requests.get(url, stream=True, timeout=30, allow_redirects=True)
             r.raise_for_status()

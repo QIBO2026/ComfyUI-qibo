@@ -125,6 +125,22 @@ def _resolve_dest_dir(folder):
     return None
 
 
+HF_MIRROR_HOST = "hf-mirror.com"
+
+
+def _to_hf_mirror(url):
+    """将 huggingface.co 链接替换为国内镜像 hf-mirror.com，加速下载。非 HF 链接原样返回。"""
+    if not url:
+        return url
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except Exception:
+        return url
+    if (parsed.hostname or "").lower() == "huggingface.co":
+        return urllib.parse.urlunsplit(parsed._replace(netloc=HF_MIRROR_HOST))
+    return url
+
+
 def _build_download_headers(url):
     """根据下载 URL 域名构造请求头，避免跨站 Referer 触发防盗链返回 HTML。"""
     host = urllib.parse.urlparse(url).hostname or ""
@@ -378,6 +394,9 @@ def register_server_routes():
         model_id = (payload.get("model_id") or "").strip() or None
         subpath = (payload.get("subpath") or "").strip()
         subpath_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
+        rename_to = (payload.get("rename_to") or "").strip()
+        if direct_url:
+            direct_url = _to_hf_mirror(direct_url)
 
         dest_dir = _resolve_dest_dir(folder)
         if not dest_dir:
@@ -390,14 +409,17 @@ def register_server_routes():
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
             else:
                 dest = os.path.join(dest_dir, fname)
+            final_dest = dest
+            if rename_to and rename_to != fname:
+                final_dest = os.path.join(os.path.dirname(dest), rename_to)
             task_id = str(uuid.uuid4())
             with _task_lock:
                 _download_tasks[task_id] = {
                     "status": "connecting",
-                    "filename": fname,
+                    "filename": rename_to or fname,
                     "folder": folder,
                     "subpath": "/".join(subpath_parts),
-                    "dest_path": dest,
+                    "dest_path": final_dest,
                     "downloaded": 0,
                     "total": 0,
                     "start_time": time.time(),
@@ -407,7 +429,21 @@ def register_server_routes():
 
             def _do_download():
                 try:
-                    _download_direct_with_progress(direct_url, dest, task_id)
+                    if rename_to and rename_to != fname:
+                        _download_direct_with_progress(direct_url, dest, task_id)
+                        try:
+                            if os.path.exists(final_dest):
+                                os.remove(final_dest)
+                            os.rename(dest, final_dest)
+                        except Exception as re:
+                            with _task_lock:
+                                t = _download_tasks.get(task_id)
+                                if t:
+                                    t["status"] = "error"
+                                    t["error"] = f"重命名失败: {re}"
+                            return
+                    else:
+                        _download_direct_with_progress(direct_url, dest, task_id)
                 except Exception as e:
                     with _task_lock:
                         t = _download_tasks.get(task_id)
@@ -417,7 +453,7 @@ def register_server_routes():
 
             thread = threading.Thread(target=_do_download, daemon=True)
             thread.start()
-            return web.json_response({"task_id": task_id, "filename": fname, "folder": folder, "dest_path": dest})
+            return web.json_response({"task_id": task_id, "filename": rename_to or fname, "folder": folder, "dest_path": final_dest})
         elif model_id:
             try:
                 res = await asyncio.to_thread(_download_sdk, model_id, dest_dir, filename)
@@ -479,6 +515,7 @@ def register_server_routes():
         owner, name, rev, path, source, base_url = parsed
         try:
             if source == "huggingface":
+                base_url = _to_hf_mirror(base_url)
                 files = await asyncio.to_thread(_list_hf_repo_files, owner, name, rev, path, base_url)
             else:
                 files = await asyncio.to_thread(_list_repo_files, owner, name, rev, path)
@@ -518,24 +555,41 @@ def register_server_routes():
         for f in files:
             folder = f.get("local_folder") or default_folder
             direct_url = f.get("direct_url")
+            direct_url = _to_hf_mirror(direct_url) if direct_url else direct_url
             fname = f.get("name") or os.path.basename(f.get("path", ""))
             subpath = (f.get("subpath") or "").strip()
             subpath_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
+            rename_to = (f.get("rename_to") or "").strip()
             dest_dir = _resolve_dest_dir(folder)
             if not dest_dir:
-                results.append({"name": fname, "error": f"未找到目录: {folder}"})
+                results.append({"name": rename_to or fname, "error": f"未找到目录: {folder}"})
                 continue
             if subpath_parts:
                 dest = os.path.join(dest_dir, *subpath_parts, fname)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
             else:
                 dest = os.path.join(dest_dir, fname)
+            final_dest = dest
+            if rename_to and rename_to != fname:
+                final_dest = os.path.join(os.path.dirname(dest), rename_to)
             try:
                 res = await asyncio.to_thread(_download_direct, direct_url, dest)
+                if rename_to and rename_to != fname and res.get("ok"):
+                    try:
+                        if os.path.exists(final_dest):
+                            os.remove(final_dest)
+                        os.rename(dest, final_dest)
+                        res["full_path"] = final_dest
+                    except Exception as re:
+                        res["ok"] = False
+                        res["error"] = f"重命名失败: {re}"
+                        res["full_path"] = dest
                 res["folder"] = folder
-                res["full_path"] = dest
+                if not res.get("full_path"):
+                    res["full_path"] = final_dest
+                res["name"] = rename_to or fname
                 results.append(res)
             except Exception as e:
-                results.append({"name": fname, "error": str(e)})
+                results.append({"name": rename_to or fname, "error": str(e)})
         ok_count = sum(1 for r in results if r.get("ok"))
         return web.json_response({"results": results, "total": len(results), "ok": ok_count})
