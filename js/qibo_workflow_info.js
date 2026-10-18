@@ -480,10 +480,10 @@ app.registerExtension({
                 }
                 selectAllCb.onchange = () => {
                     selectAllCb.style.background = selectAllCb.checked ? "#007acc" : "transparent";
-                    content.querySelectorAll(".qibo-file-cb").forEach(cb => { cb.checked = selectAllCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; });
+                    content.querySelectorAll(".qibo-file-cb").forEach(cb => { if (cb.disabled) return; cb.checked = selectAllCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; });
                     if (self.__qiboSelectedIdxs) {
                         self.__qiboSelectedIdxs.clear();
-                        if (selectAllCb.checked) { for (let idx = 0; idx < allFiles.length; idx++) self.__qiboSelectedIdxs.add(idx); }
+                        if (selectAllCb.checked) { for (let idx = 0; idx < allFiles.length; idx++) { if (!allFiles[idx].local_exists) self.__qiboSelectedIdxs.add(idx); } }
                     }
                 };
                 const selectAllLabel = document.createElement("label");
@@ -519,7 +519,7 @@ app.registerExtension({
                     folderContent.style.cssText = "display:flex;flex-direction:column;min-width:100%;width:max-content;";
                     groupCb.onchange = () => {
                         groupCb.style.background = groupCb.checked ? "#007acc" : "transparent";
-                        for (const idx of byFolder[folder]) { const cb = content.querySelector(`.qibo-file-cb[data-idx="${idx}"]`); if (cb) { cb.checked = groupCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; } }
+                        for (const idx of byFolder[folder]) { const cb = content.querySelector(`.qibo-file-cb[data-idx="${idx}"]`); if (cb) { if (cb.disabled) continue; cb.checked = groupCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; if (self.__qiboSelectedIdxs) { if (cb.checked) self.__qiboSelectedIdxs.add(idx); else self.__qiboSelectedIdxs.delete(idx); } } }
                     };
                     const folderLabel = document.createElement("span");
                     folderLabel.style.cssText = "color:#dcb67a;";
@@ -547,8 +547,10 @@ app.registerExtension({
                         cb.dataset.idx = String(i);
                         cb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
                         if (self.__qiboSelectedIdxs && self.__qiboSelectedIdxs.has(i)) { cb.checked = true; cb.style.background = "#007acc"; }
+                        if (f.local_exists) { cb.disabled = true; cb.style.opacity = "0.35"; cb.style.cursor = "default"; cb.title = "本地已存在，无需下载"; }
                         cb.onclick = (e) => e.stopPropagation();
                         cb.onchange = () => {
+                            if (cb.disabled) return;
                             cb.style.background = cb.checked ? "#007acc" : "transparent";
                             if (self.__qiboSelectedIdxs) { if (cb.checked) self.__qiboSelectedIdxs.add(i); else self.__qiboSelectedIdxs.delete(i); }
                         };
@@ -576,7 +578,7 @@ app.registerExtension({
                         if (f.local_exists) { const checkIcon = document.createElement("span"); checkIcon.style.cssText = "color:#4caf50;font-size:14px;"; checkIcon.textContent = "✓"; itemRight.appendChild(checkIcon); }
                         itemEl.appendChild(itemInfo);
                         itemEl.appendChild(itemRight);
-                        itemEl.onclick = (e) => { if (e.target.tagName === "INPUT") return; cb.checked = !cb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; };
+                        itemEl.onclick = (e) => { if (e.target.tagName === "INPUT") return; if (cb.disabled) return; cb.checked = !cb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; };
                         itemEl.oncontextmenu = (e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -756,6 +758,26 @@ app.registerExtension({
                         matched.push(f);
                     } else unmatched.push(m.orig_value || (wantSub ? wantSub + "/" + wantName : wantName));
                 }
+                const presentModels = (res.present_models || []).filter(m => !m.is_placeholder);
+                const seenPresent = new Set();
+                for (const m of presentModels) {
+                    const key = (m.subpath || "") + "/" + m.value + "|" + (m.folder || "");
+                    if (seenPresent.has(key)) continue;
+                    seenPresent.add(key);
+                    matched.push({
+                        name: m.value,
+                        local_folder: m.folder,
+                        subpath: m.subpath || "",
+                        local_exists: true,
+                        size: 0,
+                        direct_url: "",
+                        _repo: "(本地已有)",
+                        rename_to: "",
+                        rename_from: "",
+                        orig_value: m.orig_value || "",
+                        is_local_present: true,
+                    });
+                }
                 self.__qiboMatchedFiles = matched;
                 if (self.__qiboSelectedIdxs) {
                     self.__qiboSelectedIdxs.clear();
@@ -790,8 +812,10 @@ app.registerExtension({
                         }
                     }
                     diag.push("");
-                    diag.push(`从仓库地址列文件匹配 ${matched.length}/${uniqMiss.length}:`);
-                    for (const f of matched) {
+                    const downloadMatched = matched.filter(f => !f.local_exists);
+                    const localPresent = matched.filter(f => f.local_exists);
+                    diag.push(`从仓库地址列文件匹配 ${downloadMatched.length}/${uniqMiss.length}:`);
+                    for (const f of downloadMatched) {
                         const localName = f.rename_to || f.name;
                         const rel = f.subpath ? `${f.subpath}/${localName}` : localName;
                         if (f.rename_to && f.rename_to !== f.name) {
@@ -800,10 +824,18 @@ app.registerExtension({
                             diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}`);
                         }
                     }
+                    if (localPresent.length > 0) {
+                        diag.push("");
+                        diag.push(`本地已存在 ${localPresent.length} 个（右栏已打钩，不勾选下载）:`);
+                        for (const f of localPresent) {
+                            const rel = f.subpath ? `${f.subpath}/${f.name}` : f.name;
+                            diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  (本地已有)`);
+                        }
+                    }
                     for (const u of unmatched) diag.push(`  ❌ ${u}  未找到`);
                     if (repoErrors.length) { diag.push("", "列文件错误:"); for (const e of repoErrors) diag.push("  " + e); }
                     diag.push("");
-                    if (matched.length > 0) diag.push(`✅ 右栏已显示 ${matched.length} 个匹配文件，点"2、一键下载缺少"开始下载`);
+                    if (matched.length > 0) diag.push(`✅ 右栏已显示 ${matched.length} 个文件（可下载 ${downloadMatched.length}，本地已有 ${localPresent.length}），点"2、一键下载缺少"开始下载`);
                     else diag.push("⚠ 未匹配到，请检查左栏仓库地址");
                     widget.value = diag.join("\n");
                 } catch (e) {
@@ -1256,8 +1288,10 @@ app.registerExtension({
                         const result = await detectAndMatch();
                         if (result.error) { logLines.push("❌ " + result.error); updateWidget(); return; }
                         matched = result.matched;
-                        logLines.push(`检测到 ${result.uniqMiss.length} 个缺失模型，匹配 ${matched.length} 个:`);
-                        for (const f of matched) {
+                        const dlMatched = matched.filter(f => !f.local_exists);
+                        const lpMatched = matched.filter(f => f.local_exists);
+                        logLines.push(`检测到 ${result.uniqMiss.length} 个缺失模型，可下载 ${dlMatched.length} 个，本地已有 ${lpMatched.length} 个:`);
+                        for (const f of dlMatched) {
                             const localName = f.rename_to || f.name;
                             const rel = f.subpath ? `${f.subpath}/${localName}` : localName;
                             if (f.rename_to && f.rename_to !== f.name) {
@@ -1265,6 +1299,10 @@ app.registerExtension({
                             } else {
                                 logLines.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}`);
                             }
+                        }
+                        for (const f of lpMatched) {
+                            const rel = f.subpath ? `${f.subpath}/${f.name}` : f.name;
+                            logLines.push(`  ✓ models/${f.local_folder || "?"}/${rel}  (本地已有)`);
                         }
                         for (const u of result.unmatched) logLines.push(`  ❌ ${u}  未找到`);
                         updateWidget();
