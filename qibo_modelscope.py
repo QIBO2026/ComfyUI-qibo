@@ -193,16 +193,23 @@ def _download_direct_with_progress(url, dest_path, task_id, timeout=1200):
         if t:
             t["total"] = total
             t["start_time"] = start_time
+            t["status"] = "downloading"
     with open(dest_path, "wb") as f:
         for chunk in r.iter_content(1024 * 1024):
             if chunk:
                 f.write(chunk)
                 done += len(chunk)
+                now = time.time()
                 with _task_lock:
                     t = _download_tasks.get(task_id)
                     if t:
                         t["downloaded"] = done
                         t["status"] = "downloading"
+                        rc = t["recent_chunks"]
+                        rc.append((now, len(chunk)))
+                        cutoff = now - 3
+                        while rc and rc[0][0] < cutoff:
+                            rc.pop(0)
     with _task_lock:
         t = _download_tasks.get(task_id)
         if t:
@@ -380,13 +387,14 @@ def register_server_routes():
             task_id = str(uuid.uuid4())
             with _task_lock:
                 _download_tasks[task_id] = {
-                    "status": "starting",
+                    "status": "connecting",
                     "filename": fname,
                     "folder": folder,
                     "dest_path": dest,
                     "downloaded": 0,
                     "total": 0,
                     "start_time": time.time(),
+                    "recent_chunks": [],
                     "error": None,
                 }
 
@@ -428,7 +436,16 @@ def register_server_routes():
             elapsed = time.time() - t["start_time"]
             downloaded = t["downloaded"]
             total = t["total"]
-            speed = downloaded / elapsed if elapsed > 0 else 0
+            rc = t.get("recent_chunks", [])
+            if len(rc) >= 2:
+                window_bytes = sum(sz for _, sz in rc)
+                window_span = rc[-1][0] - rc[0][0]
+                if window_span > 0:
+                    speed = window_bytes / window_span
+                else:
+                    speed = downloaded / elapsed if elapsed > 0 else 0
+            else:
+                speed = downloaded / elapsed if elapsed > 0 else 0
             percent = (downloaded / total * 100) if total > 0 else 0
             return web.json_response({
                 "status": t["status"],

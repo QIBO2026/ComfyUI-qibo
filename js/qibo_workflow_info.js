@@ -26,7 +26,7 @@ const COL_BORDER = "#3e3e42";
 const COL_DIM = "#858585";
 
 function fmtSize(bytes) {
-    if (!bytes) return "?";
+    if (bytes == null || isNaN(bytes)) return "?";
     if (bytes < 1024) return bytes + "B";
     if (bytes < 1048576) return (bytes / 1024).toFixed(1) + "KB";
     if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + "MB";
@@ -1101,9 +1101,14 @@ app.registerExtension({
                                     updateWidget();
                                     break;
                                 }
-                                const pct = pres.total > 0 ? pres.percent.toFixed(1) : "?";
+                                if (pres.status === "starting" || pres.status === "connecting") {
+                                    logLines[lineIdx] = `⏳ [${i + 1}/${dlFiles.length}] ${f.name}  连接中...`;
+                                    updateWidget();
+                                    continue;
+                                }
+                                const pct = pres.total > 0 ? pres.percent.toFixed(1) : "—";
                                 const dl = fmtSize(pres.downloaded);
-                                const tot = pres.total > 0 ? fmtSize(pres.total) : "?";
+                                const tot = pres.total > 0 ? fmtSize(pres.total) : "未知";
                                 const spd = fmtSize(pres.speed);
                                 logLines[lineIdx] = `⏳ [${i + 1}/${dlFiles.length}] ${f.name}  ${dl}/${tot}  ${pct}%  ${spd}/s`;
                                 updateWidget();
@@ -1195,9 +1200,10 @@ app.registerExtension({
                                     const pres = await pr.json();
                                     if (pres.error || pres.status === "error") { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${f.name}: ${pres.error || "失败"}`; updateWidget(); break; }
                                     if (pres.status === "done") { okCount++; logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${f.name}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`; updateWidget(); appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0 }); break; }
-                                    const pct = pres.total > 0 ? pres.percent.toFixed(1) : "?";
+                                    if (pres.status === "starting" || pres.status === "connecting") { logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${f.name}  连接中...`; updateWidget(); continue; }
+                                    const pct = pres.total > 0 ? pres.percent.toFixed(1) : "—";
                                     const dl = fmtSize(pres.downloaded);
-                                    const tot = pres.total > 0 ? fmtSize(pres.total) : "?";
+                                    const tot = pres.total > 0 ? fmtSize(pres.total) : "未知";
                                     const spd = fmtSize(pres.speed);
                                     logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${f.name}  ${dl}/${tot}  ${pct}%  ${spd}/s`;
                                     updateWidget();
@@ -1628,9 +1634,15 @@ app.registerExtension({
                                     updateWidget();
                                     break;
                                 }
-                                const pct = pres.total > 0 ? pres.percent.toFixed(1) : "?";
+                                if (pres.status === "starting" || pres.status === "connecting") {
+                                    logLines[lineIdx] = `⏳ [${i + 1}/${models.length}] ${m.name}  连接中...`;
+                                    logLines[lineIdx + 1] = `    → ${folder}`;
+                                    updateWidget();
+                                    continue;
+                                }
+                                const pct = pres.total > 0 ? pres.percent.toFixed(1) : "—";
                                 const dl = fmtSize(pres.downloaded);
-                                const tot = pres.total > 0 ? fmtSize(pres.total) : "?";
+                                const tot = pres.total > 0 ? fmtSize(pres.total) : "未知";
                                 const spd = fmtSize(pres.speed);
                                 logLines[lineIdx] = `⏳ [${i + 1}/${models.length}] ${m.name}  ${dl}/${tot}  ${pct}%`;
                                 logLines[lineIdx + 1] = `    → ${folder}  速度: ${spd}/s`;
