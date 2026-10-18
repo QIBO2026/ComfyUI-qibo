@@ -376,6 +376,8 @@ def register_server_routes():
         filename = (payload.get("filename") or "").strip() or None
         direct_url = (payload.get("direct_url") or "").strip() or None
         model_id = (payload.get("model_id") or "").strip() or None
+        subpath = (payload.get("subpath") or "").strip()
+        subpath_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
 
         dest_dir = _resolve_dest_dir(folder)
         if not dest_dir:
@@ -383,13 +385,18 @@ def register_server_routes():
 
         if direct_url:
             fname = filename or os.path.basename(urllib.parse.urlparse(direct_url).path) or "model.bin"
-            dest = os.path.join(dest_dir, fname)
+            if subpath_parts:
+                dest = os.path.join(dest_dir, *subpath_parts, fname)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+            else:
+                dest = os.path.join(dest_dir, fname)
             task_id = str(uuid.uuid4())
             with _task_lock:
                 _download_tasks[task_id] = {
                     "status": "connecting",
                     "filename": fname,
                     "folder": folder,
+                    "subpath": "/".join(subpath_parts),
                     "dest_path": dest,
                     "downloaded": 0,
                     "total": 0,
@@ -512,11 +519,17 @@ def register_server_routes():
             folder = f.get("local_folder") or default_folder
             direct_url = f.get("direct_url")
             fname = f.get("name") or os.path.basename(f.get("path", ""))
+            subpath = (f.get("subpath") or "").strip()
+            subpath_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
             dest_dir = _resolve_dest_dir(folder)
             if not dest_dir:
                 results.append({"name": fname, "error": f"未找到目录: {folder}"})
                 continue
-            dest = os.path.join(dest_dir, fname)
+            if subpath_parts:
+                dest = os.path.join(dest_dir, *subpath_parts, fname)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+            else:
+                dest = os.path.join(dest_dir, fname)
             try:
                 res = await asyncio.to_thread(_download_direct, direct_url, dest)
                 res["folder"] = folder

@@ -530,7 +530,9 @@ app.registerExtension({
                         };
                         const nameSpan = document.createElement("span");
                         nameSpan.style.cssText = `white-space:nowrap;color:${f.local_exists ? "#858585" : "#cccccc"};`;
-                        nameSpan.textContent = f.name;
+                        const dispName = f.subpath ? `${f.subpath}/${f.name}` : f.name;
+                        nameSpan.textContent = dispName;
+                        nameSpan.title = dispName;
                         itemInfo.appendChild(cb);
                         itemInfo.appendChild(nameSpan);
                         const itemRight = document.createElement("div");
@@ -599,10 +601,13 @@ app.registerExtension({
                 const missModels = (res.missing_models || []).filter(m => m.status === "missing");
                 const seen = new Set();
                 const uniqMiss = [];
-                for (const m of missModels) { if (!seen.has(m.value)) { seen.add(m.value); uniqMiss.push(m); } }
+                for (const m of missModels) {
+                    const key = (m.subpath || "") + "/" + m.value;
+                    if (!seen.has(key)) { seen.add(key); uniqMiss.push(m); }
+                }
                 if (uniqMiss.length > 0) {
                     msFnWidget.options.values = uniqMiss.map(m => m.value);
-                    self.__qiboMissingModels = uniqMiss.map(m => ({ value: m.value, folder: m.folder }));
+                    self.__qiboMissingModels = uniqMiss.map(m => ({ value: m.value, folder: m.folder, subpath: m.subpath || "" }));
                     msFnWidget.value = uniqMiss[0].value;
                     if (uniqMiss[0].folder) msFolderWidget.value = uniqMiss[0].folder;
                 }
@@ -659,10 +664,17 @@ app.registerExtension({
                 let matched = [];
                 let unmatched = [];
                 for (const m of uniqMiss) {
-                    let f = allFiles.find(x => x.name === m.value);
-                    if (!f) f = allFiles.find(x => x.name.includes(m.value) || m.value.includes(x.name));
-                    if (f) { if (!f.local_folder && m.folder) f.local_folder = m.folder; matched.push(f); }
-                    else unmatched.push(m.value);
+                    const wantName = m.value;
+                    const wantSub = m.subpath || "";
+                    let f = allFiles.find(x => x.name === wantName);
+                    if (!f) f = allFiles.find(x => x.name && wantName && (x.name.toLowerCase() === wantName.toLowerCase()));
+                    if (!f) f = allFiles.find(x => x.name && wantName && (x.name.includes(wantName) || wantName.includes(x.name)));
+                    if (f) {
+                        if (!f.local_folder && m.folder) f.local_folder = m.folder;
+                        f.subpath = wantSub;
+                        f.orig_value = m.orig_value || (wantSub ? wantSub + "/" + wantName : wantName);
+                        matched.push(f);
+                    } else unmatched.push(m.orig_value || (wantSub ? wantSub + "/" + wantName : wantName));
                 }
                 self.__qiboMatchedFiles = matched;
                 if (self.__qiboSelectedIdxs) {
@@ -688,10 +700,16 @@ app.registerExtension({
                     }
                     const { uniqMiss, matched, unmatched, repoErrors } = result;
                     diag.push(`缺失模型 ${uniqMiss.length} 个:`);
-                    for (const m of uniqMiss) diag.push(`  ❓ ${m.value} [${m.folder || "?"}]`);
+                    for (const m of uniqMiss) {
+                        const full = m.subpath ? `${m.subpath}/${m.value}` : m.value;
+                        diag.push(`  ❓ ${full} [${m.folder || "?"}]`);
+                    }
                     diag.push("");
                     diag.push(`从仓库地址列文件匹配 ${matched.length}/${uniqMiss.length}:`);
-                    for (const f of matched) diag.push(`  ✓ ${f.name}  [${f.local_folder || "?"}]  ${fmtSize(f.size)}`);
+                    for (const f of matched) {
+                        const full = f.subpath ? `${f.subpath}/${f.name}` : f.name;
+                        diag.push(`  ✓ ${full}  [${f.local_folder || "?"}]  ${fmtSize(f.size)}`);
+                    }
                     for (const u of unmatched) diag.push(`  ❌ ${u}  未找到`);
                     if (repoErrors.length) { diag.push("", "列文件错误:"); for (const e of repoErrors) diag.push("  " + e); }
                     diag.push("");
@@ -1028,7 +1046,7 @@ app.registerExtension({
                     return;
                 }
 
-                const dlItems = selected.map(f => ({ name: f.name, size: f.size || 0, folder: f.local_folder || "checkpoints" }));
+                const dlItems = selected.map(f => ({ name: f.name, size: f.size || 0, folder: f.local_folder || "checkpoints", subpath: f.subpath || "" }));
                 const confirmed = await qiboConfirmDownloadList(dlItems);
                 if (!confirmed) {
                     widget.value = `已取消：未下载 ${selected.length} 个文件`;
@@ -1040,6 +1058,7 @@ app.registerExtension({
                     direct_url: f.direct_url,
                     name: f.name,
                     local_folder: f.local_folder,
+                    subpath: f.subpath || "",
                 }));
 
                 let logLines = [`⬇ 批量下载 ${dlFiles.length} 个文件`, ""];
@@ -1049,29 +1068,31 @@ app.registerExtension({
                 for (let i = 0; i < dlFiles.length; i++) {
                     const f = dlFiles[i];
                     const folder = f.local_folder || "checkpoints";
+                    const subpath = f.subpath || "";
+                    const fullDisp = subpath ? `${subpath}/${f.name}` : f.name;
                     let destPath = "";
 
                     try {
                         const r = await fetch("/qibo/modelscope/download", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder }),
+                            body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath }),
                         });
                         const res = await r.json();
                         if (res.error) {
-                            logLines.push(`❌ [${i + 1}/${dlFiles.length}] ${f.name}: ${res.error}`);
+                            logLines.push(`❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: ${res.error}`);
                             updateWidget();
                             continue;
                         }
                         if (!res.task_id) {
-                            logLines.push(`❌ [${i + 1}/${dlFiles.length}] ${f.name}: 未返回 task_id`);
+                            logLines.push(`❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: 未返回 task_id`);
                             updateWidget();
                             continue;
                         }
                         destPath = res.dest_path || "";
                         const taskId = res.task_id;
                         const lineIdx = logLines.length;
-                        logLines.push(`⏳ [${i + 1}/${dlFiles.length}] ${f.name}  准备下载...`);
+                        logLines.push(`⏳ [${i + 1}/${dlFiles.length}] ${fullDisp}  准备下载...`);
                         if (destPath) logLines.push(`  保存到: ${destPath}`);
                         updateWidget();
 
@@ -1085,24 +1106,24 @@ app.registerExtension({
                                 });
                                 const pres = await pr.json();
                                 if (pres.error) {
-                                    logLines[lineIdx] = `❌ [${i + 1}/${dlFiles.length}] ${f.name}: ${pres.error}`;
+                                    logLines[lineIdx] = `❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: ${pres.error}`;
                                     updateWidget();
                                     break;
                                 }
                                 if (pres.status === "done") {
                                     okCount++;
-                                    logLines[lineIdx] = `✓ [${i + 1}/${dlFiles.length}] ${f.name}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`;
+                                    logLines[lineIdx] = `✓ [${i + 1}/${dlFiles.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`;
                                     updateWidget();
-                                    appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0 });
+                                    appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath });
                                     break;
                                 }
                                 if (pres.status === "error") {
-                                    logLines[lineIdx] = `❌ [${i + 1}/${dlFiles.length}] ${f.name}: ${pres.error || "下载失败"}`;
+                                    logLines[lineIdx] = `❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: ${pres.error || "下载失败"}`;
                                     updateWidget();
                                     break;
                                 }
                                 if (pres.status === "starting" || pres.status === "connecting") {
-                                    logLines[lineIdx] = `⏳ [${i + 1}/${dlFiles.length}] ${f.name}  连接中...`;
+                                    logLines[lineIdx] = `⏳ [${i + 1}/${dlFiles.length}] ${fullDisp}  连接中...`;
                                     updateWidget();
                                     continue;
                                 }
@@ -1110,16 +1131,16 @@ app.registerExtension({
                                 const dl = fmtSize(pres.downloaded);
                                 const tot = pres.total > 0 ? fmtSize(pres.total) : "未知";
                                 const spd = fmtSize(pres.speed);
-                                logLines[lineIdx] = `⏳ [${i + 1}/${dlFiles.length}] ${f.name}  ${dl}/${tot}  ${pct}%  ${spd}/s`;
+                                logLines[lineIdx] = `⏳ [${i + 1}/${dlFiles.length}] ${fullDisp}  ${dl}/${tot}  ${pct}%  ${spd}/s`;
                                 updateWidget();
                             } catch (e2) {
-                                logLines[lineIdx] = `❌ [${i + 1}/${dlFiles.length}] ${f.name}: 轮询失败 ${e2}`;
+                                logLines[lineIdx] = `❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: 轮询失败 ${e2}`;
                                 updateWidget();
                                 break;
                             }
                         }
                     } catch (e) {
-                        logLines.push(`❌ [${i + 1}/${dlFiles.length}] ${f.name}: ${e}`);
+                        logLines.push(`❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: ${e}`);
                         updateWidget();
                     }
                 }
@@ -1145,7 +1166,10 @@ app.registerExtension({
                         if (result.error) { logLines.push("❌ " + result.error); updateWidget(); return; }
                         matched = result.matched;
                         logLines.push(`检测到 ${result.uniqMiss.length} 个缺失模型，匹配 ${matched.length} 个:`);
-                        for (const f of matched) logLines.push(`  ✓ ${f.name}  [${f.local_folder || "?"}]  ${fmtSize(f.size)}`);
+                        for (const f of matched) {
+                            const full = f.subpath ? `${f.subpath}/${f.name}` : f.name;
+                            logLines.push(`  ✓ ${full}  [${f.local_folder || "?"}]  ${fmtSize(f.size)}`);
+                        }
                         for (const u of result.unmatched) logLines.push(`  ❌ ${u}  未找到`);
                         updateWidget();
                     }
@@ -1159,8 +1183,9 @@ app.registerExtension({
                     if (localExist.length > 0) {
                         logLines.push("", `ℹ️ ${localExist.length} 个已存在本地，跳过下载，加入清单:`);
                         for (const f of localExist) {
-                            logLines.push(`  ✓ ${f.name}`);
-                            appendToManifest({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || "checkpoints", size: f.size || 0 });
+                            const full = f.subpath ? `${f.subpath}/${f.name}` : f.name;
+                            logLines.push(`  ✓ ${full}`);
+                            appendToManifest({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || "checkpoints", size: f.size || 0, subpath: f.subpath || "" });
                         }
                     }
                     if (localMissing.length === 0) {
@@ -1174,19 +1199,21 @@ app.registerExtension({
                     for (let i = 0; i < localMissing.length; i++) {
                         const f = localMissing[i];
                         const folder = f.local_folder || "checkpoints";
+                        const subpath = f.subpath || "";
+                        const fullDisp = subpath ? `${subpath}/${f.name}` : f.name;
                         try {
                             const dr = await fetch("/qibo/modelscope/download", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder }),
+                                body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath }),
                             });
                             const dres = await dr.json();
-                            if (dres.error) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${f.name}: ${dres.error}`); updateWidget(); continue; }
-                            if (!dres.task_id) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${f.name}: 未返回 task_id`); updateWidget(); continue; }
+                            if (dres.error) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${fullDisp}: ${dres.error}`); updateWidget(); continue; }
+                            if (!dres.task_id) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${fullDisp}: 未返回 task_id`); updateWidget(); continue; }
                             const taskId = dres.task_id;
                             const destPath = dres.dest_path || "";
                             const lineIdx = logLines.length;
-                            logLines.push(`⏳ [${i + 1}/${localMissing.length}] ${f.name}  准备下载...`);
+                            logLines.push(`⏳ [${i + 1}/${localMissing.length}] ${fullDisp}  准备下载...`);
                             if (destPath) logLines.push(`  保存到: ${destPath}`);
                             updateWidget();
                             while (true) {
@@ -1198,18 +1225,18 @@ app.registerExtension({
                                         body: JSON.stringify({ task_id: taskId }),
                                     });
                                     const pres = await pr.json();
-                                    if (pres.error || pres.status === "error") { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${f.name}: ${pres.error || "失败"}`; updateWidget(); break; }
-                                    if (pres.status === "done") { okCount++; logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${f.name}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`; updateWidget(); appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0 }); break; }
-                                    if (pres.status === "starting" || pres.status === "connecting") { logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${f.name}  连接中...`; updateWidget(); continue; }
+                                    if (pres.error || pres.status === "error") { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${fullDisp}: ${pres.error || "失败"}`; updateWidget(); break; }
+                                    if (pres.status === "done") { okCount++; logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`; updateWidget(); appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath }); break; }
+                                    if (pres.status === "starting" || pres.status === "connecting") { logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${fullDisp}  连接中...`; updateWidget(); continue; }
                                     const pct = pres.total > 0 ? pres.percent.toFixed(1) : "—";
                                     const dl = fmtSize(pres.downloaded);
                                     const tot = pres.total > 0 ? fmtSize(pres.total) : "未知";
                                     const spd = fmtSize(pres.speed);
-                                    logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${f.name}  ${dl}/${tot}  ${pct}%  ${spd}/s`;
+                                    logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${fullDisp}  ${dl}/${tot}  ${pct}%  ${spd}/s`;
                                     updateWidget();
-                                } catch (e2) { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${f.name}: 轮询失败`; updateWidget(); break; }
+                                } catch (e2) { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${fullDisp}: 轮询失败`; updateWidget(); break; }
                             }
-                        } catch (e) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${f.name}: ${e}`); updateWidget(); }
+                        } catch (e) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${fullDisp}: ${e}`); updateWidget(); }
                     }
                     logLines.push("", `✅ 下载完成: ${okCount}/${localMissing.length} 成功`);
                     updateWidget();

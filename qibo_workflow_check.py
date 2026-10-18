@@ -205,6 +205,13 @@ FIELD_NAME_FOLDER = [
     ("upscale_model", "upscale_models"),
 ]
 
+MODEL_EXTENSIONS = {
+    ".safetensors", ".gguf", ".ckpt", ".pth", ".pt", ".bin",
+    ".onnx", ".t5xxl", ".model", ".vae", ".sft", ".fp8", ".fp16",
+    ".bf16", ".q8_0", ".q4_k_m", ".q4_k_s", ".q5_k_m", ".q5_k_s",
+    ".pt2", ".pkl", ".gguf2", ".ot", ".mlmodel", ".engine",
+}
+
 
 def _resolve_folder(class_type, field):
     folder = MODEL_FIELD_FOLDER.get((class_type, field))
@@ -228,6 +235,42 @@ def _resolve_folder(class_type, field):
             return "vae"
         return "checkpoints"
     return None
+
+
+def _guess_folder_by_class(class_type):
+    ct = (class_type or "").lower()
+    if any(x in ct for x in ("unet", "diffusion", "qwen", "ltx", "minimax", "h3")):
+        return "diffusion_models"
+    if "control" in ct:
+        return "controlnet"
+    if "upscale" in ct:
+        return "upscale_models"
+    if "lora" in ct:
+        return "loras"
+    if any(x in ct for x in ("llm", "qwen2vl", "text", "clip")):
+        return "text_encoders"
+    if "vae" in ct:
+        return "vae"
+    if "checkpoint" in ct or "ckpt" in ct:
+        return "checkpoints"
+    return "checkpoints"
+
+
+def _split_subpath(value):
+    """把含子目录的模型路径拆成 (subpath, basename)。
+    subpath 用 / 分隔（前端/下载时再按系统拼接）。
+    例: "subfolder/model.gguf" -> ("subfolder", "model.gguf")
+        "model.gguf" -> ("", "model.gguf")
+    """
+    if not isinstance(value, str):
+        return "", value
+    norm = value.replace("\\", "/")
+    if "/" not in norm:
+        return "", value
+    idx = norm.rfind("/")
+    subpath = norm[:idx].strip("/")
+    basename = norm[idx + 1:].strip()
+    return subpath, basename
 
 
 def _list_folder(folder):
@@ -257,12 +300,19 @@ def _check(payload):
                 continue
             folder = _resolve_folder(class_type, k)
             if not folder:
-                continue
+                ext = os.path.splitext(v.lower())[1]
+                if ext in MODEL_EXTENSIONS:
+                    folder = _guess_folder_by_class(class_type)
+                else:
+                    continue
+            subpath, basename = _split_subpath(v)
             required_models.append({
                 "node_id": str(node_id),
                 "class_type": class_type,
                 "field": k,
-                "value": v,
+                "value": basename,
+                "orig_value": v,
+                "subpath": subpath,
                 "folder": folder,
             })
 
@@ -289,10 +339,16 @@ def _check(payload):
         ref["available"] = available or []
         if available is None:
             ref["status"] = "folder_unknown"
-        elif ref["value"] in available:
-            ref["status"] = "present"
         else:
-            ref["status"] = "missing"
+            subpath = ref.get("subpath", "")
+            basename = ref["value"]
+            if subpath:
+                rel_posix = subpath + "/" + basename
+                rel_win = subpath.replace("/", "\\") + "\\" + basename
+                present = (rel_posix in available) or (rel_win in available) or (basename in available)
+            else:
+                present = basename in available
+            ref["status"] = "present" if present else "missing"
 
     missing_node_types = sorted({n["class_type"] for n in required_nodes if not n["registered"]})
     missing_models = [m for m in required_models if m["status"] != "present"]
