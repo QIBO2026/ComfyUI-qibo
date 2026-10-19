@@ -645,6 +645,34 @@ def register_server_routes():
             return web.json_response({"error": "git pull 超时 (>120s)"})
         except Exception as e:
             return web.json_response({"error": str(e)})
+
+    @routes.post("/qibo/restart_comfyui")
+    async def qibo_restart_comfyui(request):
+        cmd = [sys.executable] + sys.argv
+        cwd = os.getcwd()
+        log_path = os.path.join(cwd, "qibo_restart.log")
+        popen_kwargs = dict(cwd=cwd, close_fds=True, stdin=subprocess.DEVNULL)
+        try:
+            lf = open(log_path, "ab")
+            popen_kwargs["stdout"] = lf
+            popen_kwargs["stderr"] = lf
+            if os.name == "nt":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            else:
+                popen_kwargs["start_new_session"] = True
+            subprocess.Popen(cmd, **popen_kwargs)
+        except Exception as e:
+            return web.json_response({"error": f"启动新进程失败: {e}"})
+        with open(log_path, "a", encoding="utf-8") as lf2:
+            lf2.write(f"\n[qibo] 重启 ComfyUI: {' '.join(cmd)}\n")
+
+        def _delayed_exit():
+            time.sleep(2)
+            os._exit(0)
+
+        threading.Thread(target=_delayed_exit, daemon=True).start()
+        return web.json_response({"ok": True, "msg": "新进程已启动，当前进程 2 秒后退出"})
+
     @routes.post("/qibo/save_model_manifest")
     async def qibo_save_model_manifest(request):
         try:
