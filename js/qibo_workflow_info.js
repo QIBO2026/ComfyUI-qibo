@@ -556,7 +556,7 @@ app.registerExtension({
                         };
                         const nameSpan = document.createElement("span");
                         nameSpan.style.cssText = `white-space:nowrap;color:${f.local_exists ? "#858585" : "#cccccc"};`;
-                        const localName = f.rename_to || f.name;
+                        const localName = f.name;
                         const dispName = f.subpath ? `${f.subpath}/${localName}` : localName;
                         nameSpan.textContent = dispName;
                         nameSpan.title = dispName;
@@ -755,13 +755,8 @@ app.registerExtension({
                         if (!f.local_folder && m.folder) f.local_folder = m.folder;
                         f.subpath = wantSub;
                         f.orig_value = m.orig_value || (wantSub ? wantSub + "/" + wantName : wantName);
-                        if (f.name && wantName && f.name !== wantName) {
-                            f.rename_to = wantName;
-                            f.rename_from = f.name;
-                        } else {
-                            f.rename_to = "";
-                            f.rename_from = "";
-                        }
+                        f.rename_to = "";
+                        f.rename_from = "";
                         matched.push(f);
                     } else unmatched.push(m.orig_value || (wantSub ? wantSub + "/" + wantName : wantName));
                 }
@@ -823,7 +818,7 @@ app.registerExtension({
                     const localPresent = matched.filter(f => f.local_exists);
                     diag.push(`从仓库地址列文件匹配 ${downloadMatched.length}/${uniqMiss.length}:`);
                     for (const f of downloadMatched) {
-                        const localName = f.rename_to || f.name;
+                        const localName = f.name;
                         const rel = f.subpath ? `${f.subpath}/${localName}` : localName;
                         if (f.rename_to && f.rename_to !== f.name) {
                             diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}  (原名: ${f.name})`);
@@ -1199,7 +1194,7 @@ app.registerExtension({
                     name: f.name,
                     local_folder: f.local_folder,
                     subpath: f.subpath || "",
-                    rename_to: f.rename_to || "",
+                    rename_to: "",
                 }));
 
                 let logLines = [`⬇ 批量下载 ${dlFiles.length} 个文件`, ""];
@@ -1210,14 +1205,14 @@ app.registerExtension({
                     const f = dlFiles[i];
                     const folder = f.local_folder || "checkpoints";
                     const subpath = f.subpath || "";
-                    const fullDisp = subpath ? `${subpath}/${f.rename_to || f.name}` : (f.rename_to || f.name);
+                    const fullDisp = subpath ? `${subpath}/${f.name}` : (f.name);
                     let destPath = "";
 
                     try {
                         const r = await fetch("/qibo/modelscope/download", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath, rename_to: f.rename_to || "" }),
+                            body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath }),
                         });
                         const res = await r.json();
                         if (res.error) {
@@ -1263,7 +1258,7 @@ app.registerExtension({
                                     okCount++;
                                     logLines[lineIdx] = `✓ [${i + 1}/${dlFiles.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`;
                                     updateWidget();
-                                    appendToManifest({ name: f.rename_to || f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath });
+                                    appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath });
                                     break;
                                 }
                                 if (pres.status === "error") {
@@ -1320,7 +1315,7 @@ app.registerExtension({
                         const lpMatched = matched.filter(f => f.local_exists);
                         logLines.push(`检测到 ${result.uniqMiss.length} 个缺失模型，可下载 ${dlMatched.length} 个，本地已有 ${lpMatched.length} 个:`);
                         for (const f of dlMatched) {
-                            const localName = f.rename_to || f.name;
+                            const localName = f.name;
                             const rel = f.subpath ? `${f.subpath}/${localName}` : localName;
                             if (f.rename_to && f.rename_to !== f.name) {
                                 logLines.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}  (原名: ${f.name})`);
@@ -1347,7 +1342,7 @@ app.registerExtension({
                         for (const f of localExist) {
                             const full = f.subpath ? `${f.subpath}/${f.name}` : f.name;
                             logLines.push(`  ✓ ${full}`);
-                            appendToManifest({ name: f.rename_to || f.name, direct_url: f.direct_url, folder: f.local_folder || "checkpoints", size: f.size || 0, subpath: f.subpath || "" });
+                            appendToManifest({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || "checkpoints", size: f.size || 0, subpath: f.subpath || "" });
                         }
                     }
                     if (localMissing.length === 0) {
@@ -1362,12 +1357,12 @@ app.registerExtension({
                         const f = localMissing[i];
                         const folder = f.local_folder || "checkpoints";
                         const subpath = f.subpath || "";
-                        const fullDisp = subpath ? `${subpath}/${f.rename_to || f.name}` : (f.rename_to || f.name);
+                        const fullDisp = subpath ? `${subpath}/${f.name}` : (f.name);
                         try {
                             const dr = await fetch("/qibo/modelscope/download", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath, rename_to: f.rename_to || "" }),
+                                body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath }),
                             });
                             const dres = await dr.json();
                             if (dres.error) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${fullDisp}: ${dres.error}`); updateWidget(); continue; }
@@ -1391,7 +1386,7 @@ app.registerExtension({
                                     const pres = await pr.json();
                                     if (pres.status === "cancelled") { cancelledByUser = true; logLines[lineIdx] = `🚫 [${i + 1}/${localMissing.length}] ${fullDisp}  已取消，残留文件已删除`; updateWidget(); break; }
                                     if (pres.error || pres.status === "error") { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${fullDisp}: ${pres.error || "失败"}`; updateWidget(); break; }
-                                    if (pres.status === "done") { okCount++; logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`; updateWidget(); appendToManifest({ name: f.rename_to || f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath }); break; }
+                                    if (pres.status === "done") { okCount++; logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`; updateWidget(); appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath }); break; }
                                     if (pres.status === "starting" || pres.status === "connecting") { logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${fullDisp}  连接中...`; updateWidget(); continue; }
                                     const pct = pres.total > 0 ? pres.percent.toFixed(1) : "—";
                                     const dl = fmtSize(pres.downloaded);
@@ -1732,7 +1727,7 @@ app.registerExtension({
                         }
                         if (f) {
                             if (!f.local_folder && m.folder) f.local_folder = m.folder;
-                            matched.push({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || m.folder || "checkpoints", size: f.size || 0, subpath: m.subpath || "", orig_value: m.orig_value || m.value, rename_to: (f.name && m.value && f.name !== m.value) ? m.value : "" });
+                                    matched.push({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || m.folder || "checkpoints", size: f.size || 0, subpath: m.subpath || "", orig_value: m.orig_value || m.value, rename_to: "" });
                         } else {
                             unmatched.push(m);
                         }
@@ -1753,7 +1748,7 @@ app.registerExtension({
                                 }
                                 if (f) {
                                     if (!f.local_folder && m.folder) f.local_folder = m.folder;
-                                    matched.push({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || m.folder || "checkpoints", size: f.size || 0, subpath: m.subpath || "", orig_value: m.orig_value || m.value, rename_to: (f.name && m.value && f.name !== m.value) ? m.value : "" });
+                            matched.push({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || m.folder || "checkpoints", size: f.size || 0, subpath: m.subpath || "", orig_value: m.orig_value || m.value, rename_to: "" });
                                     logLines.push(`  ↳ url_model.txt 兜底匹配: ${m.value} → ${f.name}`);
                                 } else {
                                     stillUnmatched.push(m);
@@ -1858,7 +1853,7 @@ app.registerExtension({
                             const dres = await fetchJson("/qibo/modelscope/download", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ direct_url: m.direct_url, filename: m.name, folder, subpath: m.subpath || "", rename_to: m.rename_to || "" }),
+                                body: JSON.stringify({ direct_url: m.direct_url, filename: m.name, folder, subpath: m.subpath || "" }),
                             });
                             if (dres.__error) { logLines[lineIdx] = `❌ [${i + 1}/${models.length}] ${m.name}: ${dres.__error}`; logLines[lineIdx + 1] = ""; updateWidget(); continue; }
                             if (dres.error) { logLines[lineIdx] = `❌ [${i + 1}/${models.length}] ${m.name}: ${dres.error}`; logLines[lineIdx + 1] = ""; updateWidget(); continue; }
