@@ -743,6 +743,7 @@ def register_server_routes():
         rparsed = _parse_resolve_url(url)
         if rparsed:
             owner, name, rev, fpath, source, base_url = rparsed
+            fname = os.path.basename(fpath.replace("\\", "/"))
             if source == "huggingface":
                 direct_url = f"{_to_hf_mirror(base_url)}/{owner}/{name}/resolve/{rev}/{fpath}"
             else:
