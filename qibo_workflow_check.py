@@ -304,6 +304,25 @@ def _list_folder(folder):
         return None
 
 
+def _local_model_size(folder, subpath, basename):
+    """返回本地模型文件实际字节数，找不到返回 0。"""
+    try:
+        import folder_paths as fp
+        dirs = fp.folder_names_and_paths.get(folder, ([], set()))[0]
+    except Exception:
+        return 0
+    parts = [p for p in (subpath or "").replace("\\", "/").split("/") if p and p not in (".", "..")]
+    for d in dirs:
+        for rel in ([os.path.join(*parts, basename), basename] if parts else [basename]):
+            p = os.path.join(d, rel)
+            if os.path.isfile(p):
+                try:
+                    return os.path.getsize(p)
+                except Exception:
+                    return 0
+    return 0
+
+
 def _check(payload):
     from nodes import NODE_CLASS_MAPPINGS
     nodes_map = payload.get("nodes") or {}
@@ -403,6 +422,8 @@ def _check(payload):
             else:
                 present = basename in available
             ref["status"] = "present" if present else "missing"
+            if present:
+                ref["size"] = _local_model_size(folder, subpath, basename)
 
     missing_node_types = sorted({n["class_type"] for n in required_nodes if not n["registered"]})
     missing_models = [m for m in required_models if m["status"] != "present"]

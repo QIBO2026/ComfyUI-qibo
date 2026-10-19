@@ -734,24 +734,16 @@ app.registerExtension({
                         }
                         continue;
                     }
-                    let f = allFiles.find(x => x.name === wantName);
-                    if (!f) f = allFiles.find(x => x.name && wantName && (x.name.toLowerCase() === wantName.toLowerCase()));
-                    if (!f) f = allFiles.find(x => x.name && wantName && (x.name.includes(wantName) || wantName.includes(x.name)));
-                    if (!f && wantName) {
-                        const wantTokens = new Set(wantName.toLowerCase().split(/[-_.\s]+/).filter(t => t.length > 1));
-                        const wantExt = wantName.toLowerCase().split(".").pop();
-                        let best = null, bestScore = 0;
-                        for (const x of allFiles) {
-                            if (!x.name) continue;
-                            const xTokens = new Set(x.name.toLowerCase().split(/[-_.\s]+/).filter(t => t.length > 1));
-                            const xExt = x.name.toLowerCase().split(".").pop();
-                            let common = 0;
-                            for (const t of xTokens) if (wantTokens.has(t)) common++;
-                            if (common >= 2 && xExt === wantExt && common > bestScore) { best = x; bestScore = common; }
-                        }
-                        if (best) f = best;
-                    }
+                    const fileKey = (x) => x.direct_url || (x._repo + "/" + x.name);
+                    const pickFile = (wantName) => {
+                        const isFree = (x) => !usedFileSet.has(fileKey(x));
+                        let cands = allFiles.filter(x => x.name === wantName && isFree(x));
+                        if (cands.length === 0) cands = allFiles.filter(x => x.name && wantName && x.name.toLowerCase() === wantName.toLowerCase() && isFree(x));
+                        return cands[0] || null;
+                    };
+                    let f = wantName ? pickFile(wantName) : null;
                     if (f) {
+                        usedFileSet.add(fileKey(f));
                         if (!f.local_folder && m.folder) f.local_folder = m.folder;
                         f.subpath = wantSub;
                         f.orig_value = m.orig_value || (wantSub ? wantSub + "/" + wantName : wantName);
@@ -771,7 +763,7 @@ app.registerExtension({
                         local_folder: m.folder,
                         subpath: m.subpath || "",
                         local_exists: true,
-                        size: 0,
+                        size: m.size || 0,
                         direct_url: "",
                         _repo: "(本地已有)",
                         rename_to: "",
@@ -820,8 +812,11 @@ app.registerExtension({
                     for (const f of downloadMatched) {
                         const localName = f.name;
                         const rel = f.subpath ? `${f.subpath}/${localName}` : localName;
-                        if (f.rename_to && f.rename_to !== f.name) {
-                            diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}  (原名: ${f.name})`);
+                        const wantBase = (f.orig_value || "").split("/").pop();
+                        const wantSubPath = (f.orig_value || "").includes("/") ? (f.orig_value || "").split("/").slice(0, -1).join("/") : "";
+                        const sameWant = (wantBase === localName) && (!wantSubPath || wantSubPath === f.subpath);
+                        if (!sameWant) {
+                            diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}  ← 工作流需求: ${f.orig_value || "?"}`);
                         } else {
                             diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}`);
                         }
@@ -831,7 +826,8 @@ app.registerExtension({
                         diag.push(`本地已存在 ${localPresent.length} 个（右栏已打钩，不勾选下载）:`);
                         for (const f of localPresent) {
                             const rel = f.subpath ? `${f.subpath}/${f.name}` : f.name;
-                            diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  (本地已有)`);
+                            const sz = f.size ? `  ${fmtSize(f.size)}` : "";
+                            diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}${sz}  (本地已有)`);
                         }
                     }
                     for (const u of unmatched) diag.push(`  ❌ ${u}  未找到`);
@@ -1697,21 +1693,7 @@ app.registerExtension({
                     const matchOne = (m, pool) => {
                         if (!m.value) return null;
                         let f = pool.find(x => x.name === m.value);
-                        if (!f) f = pool.find(x => x.name && (x.name.includes(m.value) || m.value.includes(x.name)));
-                        if (!f) {
-                            const wantTokens = new Set(m.value.toLowerCase().split(/[-_.\s]+/).filter(t => t.length > 1));
-                            const wantExt = m.value.toLowerCase().split(".").pop();
-                            let best = null, bestScore = 0;
-                            for (const x of pool) {
-                                if (!x.name) continue;
-                                const xTokens = new Set(x.name.toLowerCase().split(/[-_.\s]+/).filter(t => t.length > 1));
-                                const xExt = x.name.toLowerCase().split(".").pop();
-                                let common = 0;
-                                for (const t of xTokens) if (wantTokens.has(t)) common++;
-                                if (common >= 2 && xExt === wantExt && common > bestScore) { best = x; bestScore = common; }
-                            }
-                            if (best) f = best;
-                        }
+                        if (!f) f = pool.find(x => x.name && x.name.toLowerCase() === m.value.toLowerCase());
                         return f;
                     };
                     let matched = [];
