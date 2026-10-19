@@ -483,7 +483,7 @@ app.registerExtension({
                     content.querySelectorAll(".qibo-file-cb").forEach(cb => { if (cb.disabled) return; cb.checked = selectAllCb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; });
                     if (self.__qiboSelectedIdxs) {
                         self.__qiboSelectedIdxs.clear();
-                        if (selectAllCb.checked) { for (let idx = 0; idx < allFiles.length; idx++) { if (!allFiles[idx].local_exists) self.__qiboSelectedIdxs.add(idx); } }
+                        if (selectAllCb.checked) { for (let idx = 0; idx < allFiles.length; idx++) { if (!allFiles[idx].is_local_present) self.__qiboSelectedIdxs.add(idx); } }
                     }
                 };
                 const selectAllLabel = document.createElement("label");
@@ -547,7 +547,7 @@ app.registerExtension({
                         cb.dataset.idx = String(i);
                         cb.style.cssText = "appearance:none;width:14px;height:14px;border:1px solid #555;border-radius:3px;cursor:pointer;position:relative;flex-shrink:0;";
                         if (self.__qiboSelectedIdxs && self.__qiboSelectedIdxs.has(i)) { cb.checked = true; cb.style.background = "#007acc"; }
-                        if (f.local_exists) { cb.disabled = true; cb.style.opacity = "0.35"; cb.style.cursor = "default"; cb.title = "本地已存在，无需下载"; }
+                        if (f.is_local_present) { cb.disabled = true; cb.style.opacity = "0.35"; cb.style.cursor = "default"; cb.title = "本地已存在，无需下载"; }
                         cb.onclick = (e) => e.stopPropagation();
                         cb.onchange = () => {
                             if (cb.disabled) return;
@@ -623,6 +623,41 @@ app.registerExtension({
                 }
             };
 
+            const fetchUrlModelFiles = async () => {
+                const result = { files: [], errors: [] };
+                try {
+                    const tr = await fetch("/qibo/fetch_text", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ url: "https://gitee.com/qq719703856/ComfyUI-qibo/raw/master/url_model.txt" }),
+                    });
+                    if (!tr.ok) return result;
+                    const tjson = await tr.json();
+                    if (tjson.error) { result.errors.push("url_model.txt: " + tjson.error); return result; }
+                    const listUrls = parseRepoUrls(tjson.text || "");
+                    for (const listUrl of listUrls) {
+                        const mm = listUrl.match(/modelscope\.cn\/datasets\/([^\/]+)\/([^\/]+)\/file\/view\/([^\/]+)\/([^?]+)/);
+                        if (!mm) continue;
+                        const apiUrl = "https://www.modelscope.cn/api/v1/datasets/" + mm[1] + "/" + mm[2] + "/repo?Revision=" + mm[3] + "&FilePath=" + mm[4];
+                        const jr = await fetch(apiUrl);
+                        if (!jr.ok) continue;
+                        const j = await jr.json();
+                        for (const mdl of (j.models || [])) {
+                            for (const f of (mdl.files || [])) {
+                                result.files.push({
+                                    name: f.name,
+                                    size: f.size || 0,
+                                    direct_url: f.download_url,
+                                    local_exists: false,
+                                    _repo: mdl.model_id,
+                                });
+                            }
+                        }
+                    }
+                } catch (e) { result.errors.push("url_model.txt: " + e); }
+                return result;
+            };
+
             const detectAndMatch = async () => {
                 const collected = collectGraphNodes();
                 const r = await fetch("/qibo/workflow_check", {
@@ -663,39 +698,11 @@ app.registerExtension({
                         allFiles = allFiles.concat(lres.files || []);
                     } catch (e) { repoErrors.push(`${repoUrl}: ${e}`); }
                 }
-                try {
-                    const tr = await fetch("/qibo/fetch_text", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ url: "https://gitee.com/qq719703856/ComfyUI-qibo/raw/master/url_model.txt" }),
-                    });
-                    if (tr.ok) {
-                        const tjson = await tr.json();
-                        if (tjson.error) { repoErrors.push("url_model.txt: " + tjson.error); }
-                        else {
-                            const listUrls = parseRepoUrls(tjson.text || "");
-                            for (const listUrl of listUrls) {
-                                const mm = listUrl.match(/modelscope\.cn\/datasets\/([^\/]+)\/([^\/]+)\/file\/view\/([^\/]+)\/([^?]+)/);
-                                if (!mm) continue;
-                                const apiUrl = "https://www.modelscope.cn/api/v1/datasets/" + mm[1] + "/" + mm[2] + "/repo?Revision=" + mm[3] + "&FilePath=" + mm[4];
-                                const jr = await fetch(apiUrl);
-                                if (!jr.ok) continue;
-                                const j = await jr.json();
-                                for (const mdl of (j.models || [])) {
-                                    for (const f of (mdl.files || [])) {
-                                        allFiles.push({
-                                            name: f.name,
-                                            size: f.size || 0,
-                                            direct_url: f.download_url,
-                                            local_exists: false,
-                                            _repo: mdl.model_id,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (e) { repoErrors.push("url_model.txt: " + e); }
+                {
+                    const um = await fetchUrlModelFiles();
+                    for (const e of um.errors) repoErrors.push(e);
+                    allFiles = allFiles.concat(um.files);
+                }
                 let matched = [];
                 let unmatched = [];
                 const usedFileSet = new Set();
@@ -1128,6 +1135,19 @@ app.registerExtension({
                 overlay.onclick = (e) => { if (e.target === overlay) close(false); };
             });
 
+            const showCancelButton = (taskId) => {
+                const btn = document.createElement("button");
+                btn.textContent = "取消下载";
+                btn.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:100001;background:#d13438;color:#fff;border:none;border-radius:6px;padding:10px 20px;font-size:14px;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(0,0,0,0.4);";
+                btn.onclick = async () => {
+                    btn.disabled = true;
+                    btn.textContent = "取消中...";
+                    try { await fetch("/qibo/modelscope/cancel_download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task_id: taskId }) }); } catch (e) {}
+                };
+                document.body.appendChild(btn);
+                return btn;
+            };
+
             self.__qiboBatchDownload = async () => {
                 const files = self.__qiboRepoFiles || [];
                 if (files.length === 0) {
@@ -1145,10 +1165,8 @@ app.registerExtension({
                 }
 
                 if (selected.length === 0) {
-                    const sel = (msSelectWidget.value || "all").trim();
-                    if (sel === "all") {
-                        selected = files.slice();
-                    } else {
+                    const sel = (msSelectWidget.value || "").trim();
+                    if (sel && sel !== "all") {
                         const indices = new Set();
                         for (const part of sel.split(/[,\s]+/)) {
                             const range = part.match(/^(\d+)-(\d+)$/);
@@ -1218,6 +1236,8 @@ app.registerExtension({
                         logLines.push(`⏳ [${i + 1}/${dlFiles.length}] ${fullDisp}  准备下载...`);
                         if (destPath) logLines.push(`  保存到: ${destPath}`);
                         updateWidget();
+                        const cancelBtn = showCancelButton(taskId);
+                        let cancelledByUser = false;
 
                         while (true) {
                             await new Promise(resolve => setTimeout(resolve, 800));
@@ -1230,6 +1250,12 @@ app.registerExtension({
                                 const pres = await pr.json();
                                 if (pres.error) {
                                     logLines[lineIdx] = `❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: ${pres.error}`;
+                                    updateWidget();
+                                    break;
+                                }
+                                if (pres.status === "cancelled") {
+                                    cancelledByUser = true;
+                                    logLines[lineIdx] = `🚫 [${i + 1}/${dlFiles.length}] ${fullDisp}  已取消，残留文件已删除`;
                                     updateWidget();
                                     break;
                                 }
@@ -1262,6 +1288,8 @@ app.registerExtension({
                                 break;
                             }
                         }
+                        cancelBtn.remove();
+                        if (cancelledByUser) { logLines.push("", "🚫 用户取消下载，已清理残留文件"); updateWidget(); return; }
                     } catch (e) {
                         logLines.push(`❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: ${e}`);
                         updateWidget();
@@ -1350,6 +1378,8 @@ app.registerExtension({
                             logLines.push(`⏳ [${i + 1}/${localMissing.length}] ${fullDisp}  准备下载...`);
                             if (destPath) logLines.push(`  保存到: ${destPath}`);
                             updateWidget();
+                            const cancelBtn = showCancelButton(taskId);
+                            let cancelledByUser = false;
                             while (true) {
                                 await new Promise(resolve => setTimeout(resolve, 800));
                                 try {
@@ -1359,6 +1389,7 @@ app.registerExtension({
                                         body: JSON.stringify({ task_id: taskId }),
                                     });
                                     const pres = await pr.json();
+                                    if (pres.status === "cancelled") { cancelledByUser = true; logLines[lineIdx] = `🚫 [${i + 1}/${localMissing.length}] ${fullDisp}  已取消，残留文件已删除`; updateWidget(); break; }
                                     if (pres.error || pres.status === "error") { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${fullDisp}: ${pres.error || "失败"}`; updateWidget(); break; }
                                     if (pres.status === "done") { okCount++; logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`; updateWidget(); appendToManifest({ name: f.rename_to || f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath }); break; }
                                     if (pres.status === "starting" || pres.status === "connecting") { logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${fullDisp}  连接中...`; updateWidget(); continue; }
@@ -1370,6 +1401,8 @@ app.registerExtension({
                                     updateWidget();
                                 } catch (e2) { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${fullDisp}: 轮询失败`; updateWidget(); break; }
                             }
+                            cancelBtn.remove();
+                            if (cancelledByUser) { logLines.push("", "🚫 用户取消下载，已清理残留文件"); updateWidget(); return; }
                         } catch (e) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${fullDisp}: ${e}`); updateWidget(); }
                     }
                     logLines.push("", `✅ 下载完成: ${okCount}/${localMissing.length} 成功`);
@@ -1666,16 +1699,70 @@ app.registerExtension({
                             allFiles = allFiles.concat(lr.files || []);
                         } catch (e) {}
                     }
+                    const matchOne = (m, pool) => {
+                        if (!m.value) return null;
+                        let f = pool.find(x => x.name === m.value);
+                        if (!f) f = pool.find(x => x.name && (x.name.includes(m.value) || m.value.includes(x.name)));
+                        if (!f) {
+                            const wantTokens = new Set(m.value.toLowerCase().split(/[-_.\s]+/).filter(t => t.length > 1));
+                            const wantExt = m.value.toLowerCase().split(".").pop();
+                            let best = null, bestScore = 0;
+                            for (const x of pool) {
+                                if (!x.name) continue;
+                                const xTokens = new Set(x.name.toLowerCase().split(/[-_.\s]+/).filter(t => t.length > 1));
+                                const xExt = x.name.toLowerCase().split(".").pop();
+                                let common = 0;
+                                for (const t of xTokens) if (wantTokens.has(t)) common++;
+                                if (common >= 2 && xExt === wantExt && common > bestScore) { best = x; bestScore = common; }
+                            }
+                            if (best) f = best;
+                        }
+                        return f;
+                    };
                     let matched = [];
                     let unmatched = [];
+                    const usedUrlSet = new Set();
                     for (const m of uniqAll) {
-                        let f = allFiles.find(f => f.name === m.value);
-                        if (!f) f = allFiles.find(f => f.name.includes(m.value) || m.value.includes(f.name));
+                        if (!m.value) { unmatched.push(m); continue; }
+                        let f = matchOne(m, allFiles);
+                        if (f) {
+                            const key = f.direct_url || (f._repo + "/" + f.name);
+                            if (usedUrlSet.has(key)) f = null;
+                            else usedUrlSet.add(key);
+                        }
                         if (f) {
                             if (!f.local_folder && m.folder) f.local_folder = m.folder;
-                            matched.push({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || m.folder || "checkpoints", size: f.size || 0 });
+                            matched.push({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || m.folder || "checkpoints", size: f.size || 0, subpath: m.subpath || "", orig_value: m.orig_value || m.value, rename_to: (f.name && m.value && f.name !== m.value) ? m.value : "" });
                         } else {
                             unmatched.push(m);
+                        }
+                    }
+                    if (unmatched.length > 0) {
+                        logLines.push(`第一轮匹配 ${matched.length}/${uniqAll.length}，剩余 ${unmatched.length} 个未匹配，从 url_model.txt 拉取兜底地址中...`);
+                        updateWidget();
+                        const um = await fetchUrlModelFiles();
+                        if (um.files.length > 0) {
+                            const stillUnmatched = [];
+                            for (const m of unmatched) {
+                                if (!m.value) { stillUnmatched.push(m); continue; }
+                                let f = matchOne(m, um.files);
+                                if (f) {
+                                    const key = f.direct_url || (f._repo + "/" + f.name);
+                                    if (usedUrlSet.has(key)) f = null;
+                                    else usedUrlSet.add(key);
+                                }
+                                if (f) {
+                                    if (!f.local_folder && m.folder) f.local_folder = m.folder;
+                                    matched.push({ name: f.name, direct_url: f.direct_url, folder: f.local_folder || m.folder || "checkpoints", size: f.size || 0, subpath: m.subpath || "", orig_value: m.orig_value || m.value, rename_to: (f.name && m.value && f.name !== m.value) ? m.value : "" });
+                                    logLines.push(`  ↳ url_model.txt 兜底匹配: ${m.value} → ${f.name}`);
+                                } else {
+                                    stillUnmatched.push(m);
+                                }
+                            }
+                            unmatched = stillUnmatched;
+                        }
+                        if (um.errors.length > 0) {
+                            for (const e of um.errors) logLines.push(`  ⚠ ${e}`);
                         }
                     }
                     logLines.push(`匹配 ${matched.length}/${uniqAll.length} 个:`);
@@ -1683,14 +1770,14 @@ app.registerExtension({
                     for (const u of unmatched) logLines.push(`  ✗ ${u.value}  未找到下载地址`);
                     updateWidget();
                     if (rawUrls.length === 0 && unmatched.length > 0) {
-                        logLines.push("", "⚠ 左栏“模型地址或者节点地址”输入框为空，无法采集下载地址。");
-                        logLines.push("  请在其中填入魔搭/仓库链接（可多行）后重新点“保存模型清单”来采集匹配。");
+                        logLines.push("", "⚠ 左栏“模型地址或者节点地址”输入框为空，且 url_model.txt 也未匹配到地址。");
+                        logLines.push("  请在左栏填入魔搭/仓库链接（可多行）后重新点“保存模型清单”来采集匹配。");
                         updateWidget();
                     }
 
                     const allEntries = matched.slice();
                     for (const u of unmatched) {
-                        allEntries.push({ name: u.value, direct_url: "", folder: u.folder || "checkpoints", size: 0 });
+                        allEntries.push({ name: u.value, direct_url: "", folder: u.folder || "checkpoints", size: 0, subpath: u.subpath || "", orig_value: u.orig_value || u.value, rename_to: "" });
                     }
                     if (allEntries.length === 0) { logLines.push("", "❌ 未识别到任何模型，无法保存清单"); updateWidget(); return; }
 
@@ -1771,7 +1858,7 @@ app.registerExtension({
                             const dres = await fetchJson("/qibo/modelscope/download", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ direct_url: m.direct_url, filename: m.name, folder }),
+                                body: JSON.stringify({ direct_url: m.direct_url, filename: m.name, folder, subpath: m.subpath || "", rename_to: m.rename_to || "" }),
                             });
                             if (dres.__error) { logLines[lineIdx] = `❌ [${i + 1}/${models.length}] ${m.name}: ${dres.__error}`; logLines[lineIdx + 1] = ""; updateWidget(); continue; }
                             if (dres.error) { logLines[lineIdx] = `❌ [${i + 1}/${models.length}] ${m.name}: ${dres.error}`; logLines[lineIdx + 1] = ""; updateWidget(); continue; }
@@ -1861,6 +1948,198 @@ app.registerExtension({
                     }
                     logLines.push("\n请查看 ComfyUI 启动终端（控制台）输出");
                     updateWidget();
+                } catch (e) {
+                    logLines.push(``, `❌ 异常: ${e}`);
+                    updateWidget();
+                }
+            };
+
+            const showDeleteDialog = (models) => {
+                document.querySelectorAll(".qibo-delete-overlay").forEach(el => el.remove());
+                const overlay = document.createElement("div");
+                overlay.className = "qibo-delete-overlay";
+                overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100000;display:flex;align-items:center;justify-content:center;font-family:" + FONT_CSS + ";";
+                const dlg = document.createElement("div");
+                dlg.style.cssText = `background:${COL_BG};color:${COL_FG};border:1px solid ${COL_BORDER};border-radius:8px;min-width:500px;max-width:760px;width:90%;max-height:80vh;display:flex;flex-direction:column;font-size:13px;box-shadow:0 8px 32px rgba(0,0,0,0.5);`;
+                const title = document.createElement("div");
+                title.textContent = "🗑 删除模型（当前工作流引用）";
+                title.style.cssText = `padding:10px 14px;font-weight:bold;border-bottom:1px solid ${COL_BORDER};`;
+                dlg.appendChild(title);
+                const selAllRow = document.createElement("div");
+                selAllRow.style.cssText = `padding:8px 14px;border-bottom:1px solid ${COL_BORDER};display:flex;align-items:center;gap:8px;`;
+                const selAllCb = document.createElement("input");
+                selAllCb.type = "checkbox";
+                const selAllLabel = document.createElement("span");
+                selAllLabel.textContent = "全选 / 取消全选";
+                selAllLabel.style.cursor = "pointer";
+                selAllRow.appendChild(selAllCb);
+                selAllRow.appendChild(selAllLabel);
+                dlg.appendChild(selAllRow);
+                const listEl = document.createElement("div");
+                listEl.style.cssText = "overflow-y:auto;padding:8px 14px;flex:1;";
+                const itemCbs = [];
+                for (const m of models) {
+                    const row = document.createElement("div");
+                    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:4px 0;";
+                    const cb = document.createElement("input");
+                    cb.type = "checkbox";
+
+                    const label = document.createElement("span");
+                    label.style.cssText = "white-space:nowrap;";
+                    const relPath = (m.subpath ? m.subpath + "/" : "") + m.value;
+                    label.textContent = `${relPath}  [${m.folder || "checkpoints"}]`;
+                    const isMissing = m.status === "missing" || m.status === "placeholder" || !m.value;
+                    if (isMissing) {
+                        cb.disabled = true;
+                        label.style.opacity = "0.45";
+                        label.textContent += "  (本地缺失，无可删文件)";
+                    }
+                    row.appendChild(cb);
+                    row.appendChild(label);
+                    listEl.appendChild(row);
+                    itemCbs.push({ cb, m, label, isMissing });
+                }
+                dlg.appendChild(listEl);
+                const enabledCbs = () => itemCbs.filter(it => !it.isMissing);
+                const syncSelAll = () => {
+                    const en = enabledCbs();
+                    selAllCb.checked = en.length > 0 && en.every(it => it.cb.checked);
+                    selAllCb.indeterminate = en.length > 0 && en.some(it => it.cb.checked) && !selAllCb.checked;
+                };
+                selAllCb.onchange = () => {
+                    for (const it of enabledCbs()) it.cb.checked = selAllCb.checked;
+                };
+                selAllLabel.onclick = () => {
+                    selAllCb.checked = !selAllCb.checked;
+                    selAllCb.onchange();
+                };
+                for (const it of enabledCbs()) it.cb.onchange = syncSelAll;
+
+                const btnRow = document.createElement("div");
+                btnRow.style.cssText = `padding:10px 14px;border-top:1px solid ${COL_BORDER};display:flex;gap:10px;justify-content:flex-end;align-items:center;`;
+                const statusSpan = document.createElement("span");
+                statusSpan.style.cssText = "flex:1;color:" + COL_DIM + ";";
+                const cancelBtn = document.createElement("button");
+                cancelBtn.textContent = "取消";
+                cancelBtn.style.cssText = `padding:6px 16px;border-radius:4px;border:1px solid ${COL_BORDER};background:${COL_BG};color:${COL_FG};cursor:pointer;font-size:13px;`;
+                const confirmBtn = document.createElement("button");
+                confirmBtn.textContent = "确认删除";
+                confirmBtn.style.cssText = "padding:6px 16px;border-radius:4px;border:1px solid #b0413e;background:#c0392b;color:#fff;cursor:pointer;font-size:13px;";
+                btnRow.appendChild(statusSpan);
+                btnRow.appendChild(cancelBtn);
+                btnRow.appendChild(confirmBtn);
+                dlg.appendChild(btnRow);
+                overlay.appendChild(dlg);
+                document.body.appendChild(overlay);
+                let deleted = false;
+                const close = () => overlay.remove();
+                cancelBtn.onclick = () => {
+                    close();
+                    if (!deleted) {
+                        widget.value = "🗑 删除模型\n\n已取消，未删除任何文件";
+                        self.setDirtyCanvas(true, true);
+                    }
+                };
+                overlay.addEventListener("mousedown", (ev) => {
+                    if (ev.target === overlay && !deleted) {
+                        close();
+                        widget.value = "🗑 删除模型\n\n已取消，未删除任何文件";
+                        self.setDirtyCanvas(true, true);
+                    }
+                });
+                confirmBtn.onclick = async () => {
+                    const picked = itemCbs.filter(it => !it.isMissing && it.cb.checked);
+                    if (picked.length === 0) {
+                        statusSpan.textContent = "⚠ 请先勾选要删除的模型";
+                        return;
+                    }
+                    confirmBtn.disabled = true;
+                    cancelBtn.disabled = true;
+                    selAllCb.disabled = true;
+                    for (const it of itemCbs) it.cb.disabled = true;
+                    confirmBtn.textContent = "删除中...";
+                    statusSpan.textContent = "";
+                    const reqModels = picked.map(it => ({ folder: it.m.folder || "checkpoints", subpath: it.m.subpath || "", filename: it.m.value }));
+                    try {
+                        const res = await fetchJson("/qibo/modelscope/delete", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ models: reqModels }),
+                        });
+                        const results = (res && res.results) || [];
+                        const logLines = ["🗑 删除模型", ""];
+                        if (res.__error || res.error) {
+                            statusSpan.textContent = "";
+                            logLines.push(`❌ 删除请求失败: ${res.__error || res.error}`);
+                        } else {
+                            deleted = true;
+                            let okCount = 0;
+                            let failCount = 0;
+                            for (let i = 0; i < picked.length; i++) {
+                                const r = results[i] || {};
+                                if (r.ok) {
+                                    okCount++;
+                                    picked[i].label.textContent = `✓ ${picked[i].label.textContent}`;
+                                    picked[i].label.style.color = "#4caf50";
+                                } else {
+                                    failCount++;
+                                    picked[i].label.textContent = `❌ ${picked[i].label.textContent}  (${r.error || "失败"})`;
+                                    picked[i].label.style.color = "#e57373";
+                                }
+                            }
+                            statusSpan.textContent = `完成: 成功 ${okCount} / 失败 ${failCount}`;
+                            logLines.push(`删除完成: 成功 ${okCount} / 失败 ${failCount} / 共 ${picked.length}`);
+                            for (const r of results) {
+                                if (r.ok) logLines.push(`  ✓ [${r.folder}] ${r.path || r.filename}`);
+                                else logLines.push(`  ✗ [${r.folder}] ${r.filename}: ${r.error}`);
+                            }
+                        }
+                        widget.value = logLines.join("\n");
+                        self.setDirtyCanvas(true, true);
+                    } catch (e) {
+                        statusSpan.textContent = "❌ " + e;
+                        widget.value = `🗑 删除模型\n\n❌ 异常: ${e}`;
+                        self.setDirtyCanvas(true, true);
+                    }
+                    confirmBtn.textContent = "关闭";
+                    confirmBtn.disabled = false;
+                    confirmBtn.onclick = close;
+                };
+            };
+
+            self.__qiboDeleteModels = async () => {
+                let logLines = ["🗑 删除模型", ""];
+                const updateWidget = () => { widget.value = logLines.join("\n"); self.setDirtyCanvas(true, true); };
+                updateWidget();
+                try {
+                    logLines.push("检测工作流引用的模型中...");
+                    updateWidget();
+                    const collected = collectGraphNodes();
+                    const res = await fetchJson("/qibo/workflow_check", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ nodes: collected.out }),
+                    });
+                    if (res.__error) { logLines.push(`❌ 检测失败: ${res.__error}`); updateWidget(); return; }
+                    const missModels = (res.missing_models || []);
+                    const presentModels = (res.present_models || []);
+                    const allRef = [...missModels, ...presentModels];
+                    const seen = new Set();
+                    const uniqAll = [];
+                    for (const m of allRef) {
+                        const key = (m.subpath || "") + "/" + (m.value || "") + "|" + (m.folder || "");
+                        if (!seen.has(key)) { seen.add(key); uniqAll.push(m); }
+                    }
+                    if (uniqAll.length === 0) {
+                        logLines.push("❌ 未检测到工作流引用的模型");
+                        updateWidget();
+                        return;
+                    }
+                    const missCount = uniqAll.filter(m => m.status === "missing" || m.status === "placeholder").length;
+                    logLines.push(`工作流引用 ${uniqAll.length} 个模型 (本地存在 ${uniqAll.length - missCount} / 缺失 ${missCount})`);
+                    logLines.push("已弹出删除对话框，请勾选后确认删除");
+                    updateWidget();
+                    showDeleteDialog(uniqAll);
                 } catch (e) {
                     logLines.push(``, `❌ 异常: ${e}`);
                     updateWidget();
@@ -1971,6 +2250,9 @@ app.registerExtension({
                 ["保存模型清单", () => self.__qiboSaveManifest()],
                 ["恢复模型下载", () => self.__qiboRestoreDownload()],
                 ["终端打印清单", () => self.__qiboPrintManifest()],
+            ]);
+            makeBtnRow([
+                ["删除模型", () => self.__qiboDeleteModels()],
             ]);
             leftCol.appendChild(makeLabel("工作流 JSON URL"));
             workflowUrlInput = document.createElement("input");

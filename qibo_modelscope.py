@@ -210,6 +210,7 @@ def _download_direct_with_progress(url, dest_path, task_id, timeout=1200):
             t["total"] = total
             t["start_time"] = start_time
             t["status"] = "downloading"
+    cancelled = False
     with open(dest_path, "wb") as f:
         for chunk in r.iter_content(1024 * 1024):
             if chunk:
@@ -219,6 +220,9 @@ def _download_direct_with_progress(url, dest_path, task_id, timeout=1200):
                 with _task_lock:
                     t = _download_tasks.get(task_id)
                     if t:
+                        if t.get("cancel"):
+                            cancelled = True
+                            break
                         t["downloaded"] = done
                         t["status"] = "downloading"
                         rc = t["recent_chunks"]
@@ -226,6 +230,17 @@ def _download_direct_with_progress(url, dest_path, task_id, timeout=1200):
                         cutoff = now - 3
                         while rc and rc[0][0] < cutoff:
                             rc.pop(0)
+    if cancelled:
+        try:
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+        except Exception:
+            pass
+        with _task_lock:
+            t = _download_tasks.get(task_id)
+            if t:
+                t["status"] = "cancelled"
+        return
     with _task_lock:
         t = _download_tasks.get(task_id)
         if t:
@@ -260,6 +275,42 @@ def _parse_repo_url(url):
     if m:
         return m.group(2), m.group(3), "main", "", "huggingface", m.group(1)
     return None
+
+
+def _parse_resolve_url(url):
+    """识别单文件直链:
+    - HF 兼容: {base}/{owner}/{name}/resolve/{rev}/{fpath}
+    - ModelScope: modelscope.cn/{owner}/{name}/resolve/{rev}/{fpath}
+    返回 (owner, name, rev, fpath, source, base_url) 或 None。
+    """
+    uo = urllib.parse.urlsplit(url)
+    host = (uo.hostname or "").lower()
+    path = uo.path
+    if "modelscope.cn" in host:
+        m = re.match(r'^/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/resolve/([A-Za-z0-9_.-]+)/(.+)$', path)
+        if m:
+            return m.group(1), m.group(2), m.group(3), m.group(4), "modelscope", "https://www.modelscope.cn"
+    m = re.match(r'^/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/resolve/([A-Za-z0-9_.-]+)/(.+)$', path)
+    if m:
+        base = f"{uo.scheme}://{uo.netloc}"
+        return m.group(1), m.group(2), m.group(3), m.group(4), "huggingface", base
+    return None
+
+
+def _head_resolve_file(direct_url):
+    """HEAD 请求拿文件大小；拿不到返回 0。"""
+    try:
+        r = requests.head(direct_url, headers={"User-Agent": UA}, timeout=20, allow_redirects=True)
+        if r.ok:
+            cl = r.headers.get("Content-Length")
+            if cl:
+                try:
+                    return int(cl)
+                except Exception:
+                    return 0
+    except Exception:
+        pass
+    return 0
 
 
 def _guess_local_folder(fpath, folder_keys):
@@ -425,6 +476,7 @@ def register_server_routes():
                     "start_time": time.time(),
                     "recent_chunks": [],
                     "error": None,
+                    "cancel": False,
                 }
 
             def _do_download():
@@ -500,6 +552,73 @@ def register_server_routes():
                 "percent": percent,
                 "error": t["error"],
             })
+    @routes.post("/qibo/modelscope/cancel_download")
+    async def ms_cancel_download(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        task_id = payload.get("task_id", "")
+        with _task_lock:
+            t = _download_tasks.get(task_id)
+            if not t:
+                return web.json_response({"error": "task not found"})
+            t["cancel"] = True
+        return web.json_response({"ok": True})
+
+    @routes.post("/qibo/modelscope/delete")
+    async def ms_delete(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        models = payload.get("models") or []
+        if isinstance(models, dict):
+            models = [models]
+        if not isinstance(models, list) or len(models) == 0:
+            return web.json_response({"error": "models 为空或格式错误", "results": []})
+
+        def _find_dir_readonly(folder):
+            try:
+                import folder_paths as fp
+                if folder in fp.folder_names_and_paths:
+                    dirs = fp.folder_names_and_paths[folder][0]
+                    for d in dirs:
+                        if os.path.basename(os.path.normpath(d)) == folder and os.path.isdir(d):
+                            return d
+                    for d in dirs:
+                        if os.path.isdir(d):
+                            return d
+            except Exception:
+                pass
+            return None
+
+        def _del_one(item):
+            folder = (item.get("folder") or "").strip()
+            subpath = (item.get("subpath") or "").strip()
+            filename = (item.get("filename") or "").strip()
+            if not folder or not filename:
+                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": "folder/filename 为空"}
+            dest_dir = _find_dir_readonly(folder)
+            if not dest_dir:
+                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": f"未知模型目录: {folder}"}
+            parts = [p for p in subpath.replace("\\", "/").split("/") if p and p not in (".", "..")]
+            dest = os.path.realpath(os.path.join(dest_dir, *parts, filename))
+            base = os.path.realpath(dest_dir)
+            if not dest.startswith(base + os.sep):
+                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": "非法路径"}
+            if not os.path.isfile(dest):
+                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": "文件不存在"}
+            try:
+                os.remove(dest)
+                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": True, "path": dest}
+            except Exception as e:
+                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": str(e)}
+
+        results = [_del_one(item) if isinstance(item, dict) else {"filename": "?", "ok": False, "error": "格式错误"} for item in models]
+        ok_count = sum(1 for r in results if r.get("ok"))
+        return web.json_response({"ok": ok_count, "total": len(results), "results": results})
+
     @routes.post("/qibo/modelscope/list_files")
     async def ms_list_files(request):
         try:
@@ -509,9 +628,41 @@ def register_server_routes():
         url = (payload.get("url") or "").strip()
         if not url:
             return web.json_response({"error": "url 为空", "files": []})
+        try:
+            import folder_paths as fp
+            folder_keys = set(fp.folder_names_and_paths.keys())
+        except Exception:
+            folder_keys = set()
+        rparsed = _parse_resolve_url(url)
+        if rparsed:
+            owner, name, rev, fpath, source, base_url = rparsed
+            if source == "huggingface":
+                base_url = _to_hf_mirror(base_url)
+            fname = os.path.basename(fpath)
+            direct_url = f"{base_url}/{owner}/{name}/resolve/{rev}/{fpath}"
+            size = await asyncio.to_thread(_head_resolve_file, direct_url)
+            local_folder = _guess_local_folder(fpath, folder_keys)
+            parent = os.path.basename(os.path.dirname(fpath))
+            local_exists = False
+            if local_folder:
+                dest_dir = _resolve_dest_dir(local_folder)
+                if dest_dir and os.path.exists(os.path.join(dest_dir, fname)):
+                    local_exists = True
+            return web.json_response({
+                "files": [{
+                    "path": fpath,
+                    "name": fname,
+                    "size": size,
+                    "parent_dir": parent,
+                    "local_folder": local_folder,
+                    "direct_url": direct_url,
+                    "local_exists": local_exists,
+                }],
+                "model_id": f"{owner}/{name}",
+            })
         parsed = _parse_repo_url(url)
         if not parsed:
-            return web.json_response({"error": "无法解析仓库 URL（支持 modelscope.cn / 任意 HF 兼容站点 /{owner}/{repo}）", "files": []})
+            return web.json_response({"error": "无法解析仓库 URL（支持 modelscope.cn / 任意 HF 兼容站点 /{owner}/{repo} / resolve 单文件直链）", "files": []})
         owner, name, rev, path, source, base_url = parsed
         try:
             if source == "huggingface":
