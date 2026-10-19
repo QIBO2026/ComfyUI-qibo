@@ -299,16 +299,44 @@ def _parse_resolve_url(url):
 
 
 def _head_resolve_file(direct_url):
-    """HEAD 请求拿文件大小；拿不到返回 0。"""
+    """获取文件大小：HEAD → GET stream(headers) → Range GET(Content-Range)。拿不到返回 0。"""
+    headers = _build_download_headers(direct_url)
     try:
-        r = requests.head(direct_url, headers={"User-Agent": UA}, timeout=20, allow_redirects=True)
+        r = requests.head(direct_url, headers=headers, timeout=20, allow_redirects=True)
         if r.ok:
             cl = r.headers.get("Content-Length")
             if cl:
                 try:
                     return int(cl)
                 except Exception:
-                    return 0
+                    pass
+    except Exception:
+        pass
+    try:
+        r = requests.get(direct_url, headers=headers, timeout=20, allow_redirects=True, stream=True)
+        try:
+            if r.ok:
+                cl = r.headers.get("Content-Length")
+                if cl:
+                    try:
+                        return int(cl)
+                    except Exception:
+                        pass
+        finally:
+            r.close()
+    except Exception:
+        pass
+    try:
+        rng = dict(headers)
+        rng["Range"] = "bytes=0-0"
+        r = requests.get(direct_url, headers=rng, timeout=20, allow_redirects=True, stream=True)
+        try:
+            cr = r.headers.get("Content-Range") or ""
+            m = re.search(r"/(\d+)\s*$", cr)
+            if m:
+                return int(m.group(1))
+        finally:
+            r.close()
     except Exception:
         pass
     return 0
