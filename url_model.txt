@@ -1,2 +1,2 @@
-https://www.modelscope.cn/datasets/lanren/fahuo/file/view/master/Comfy-Org_.json?id=217860
+https://www.scnet.cn/acx/aihub/gitlab/dataset/pan2458/wait/raw?branchName=main&filePath=Comfy-Org_verified_downloads.json
 https://www.scnet.cn/acx/aihub/gitlab/dataset/pan2458/wait/raw?branchName=main&filePath=Qwen3_GGUF.json
