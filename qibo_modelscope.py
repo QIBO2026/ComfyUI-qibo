@@ -460,6 +460,18 @@ def _parse_manifest_text(text, folder_keys):
 _URL_TOKEN_RE = re.compile(r"https?:\\?/\\?/[^\s\"'<>`(){}\[\]]+")
 
 
+def _clean_url(u):
+    """清理从文本提取的 URL：还原 JSON 转义 \\/、删除残留反斜杠（如结尾转义引号 \\"）、去尾部标点。"""
+    if not u:
+        return u
+    u = u.strip().replace("\\/", "/")
+    u = u.replace("\\", "")
+    u = u.rstrip("/.,;:'\"")
+    while u.upper().endswith("%5C"):
+        u = u[:-3].rstrip("/.,;:'\"")
+    return u
+
+
 def _find_link_near(text, name):
     """在 text 中搜索模型名（含后缀的 basename），在命中位置前后提取下载链接。
 
@@ -476,7 +488,7 @@ def _find_link_near(text, name):
             window = text[wstart:wend]
             cands = []
             for um in _URL_TOKEN_RE.finditer(window):
-                u = um.group(0).replace("\\/", "/").rstrip("/.,;:")
+                u = _clean_url(um.group(0))
                 if u.startswith("http://") or u.startswith("https://"):
                     cands.append((um.start(), u))
             if not cands:
@@ -628,7 +640,7 @@ def register_server_routes():
         subpath_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
         rename_to = (payload.get("rename_to") or "").strip()
         if direct_url:
-            direct_url = _to_hf_mirror(direct_url)
+            direct_url = _to_hf_mirror(_clean_url(direct_url))
 
         dest_dir = _resolve_dest_dir(folder)
         if not dest_dir:
@@ -924,7 +936,7 @@ def register_server_routes():
 
         async def _head_one(u):
             try:
-                return await asyncio.to_thread(_head_resolve_file, _to_hf_mirror(u))
+                return await asyncio.to_thread(_head_resolve_file, _to_hf_mirror(_clean_url(u)))
             except Exception:
                 return 0
 
@@ -967,7 +979,7 @@ def register_server_routes():
         for f in files:
             folder = f.get("local_folder") or default_folder
             direct_url = f.get("direct_url")
-            direct_url = _to_hf_mirror(direct_url) if direct_url else direct_url
+            direct_url = _to_hf_mirror(_clean_url(direct_url)) if direct_url else direct_url
             fname = f.get("name") or os.path.basename(f.get("path", ""))
             subpath = (f.get("subpath") or "").strip()
             subpath_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
