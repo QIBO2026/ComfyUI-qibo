@@ -429,6 +429,52 @@ def _parse_manifest_text(text, folder_keys):
     return None
 
 
+_URL_TOKEN_RE = re.compile(r"https?:\\?/\\?/[^\s\"'<>`(){}\[\]]+")
+
+
+def _find_link_near(text, name):
+    """在 text 中搜索模型名（含后缀的 basename），在命中位置前后提取下载链接。
+
+    优先取路径中包含该文件名的链接；否则取命中位置之后/之前最近的链接。
+    先区分大小写精确搜索，找不到再大小写不敏感搜索。返回链接或空串。
+    """
+    if not text or not name:
+        return ""
+    low_name = name.lower()
+    for flags in (0, re.IGNORECASE):
+        for m in re.finditer(re.escape(name), text, flags):
+            wstart = max(0, m.start() - 500)
+            wend = min(len(text), m.end() + 1500)
+            window = text[wstart:wend]
+            cands = []
+            for um in _URL_TOKEN_RE.finditer(window):
+                u = um.group(0).replace("\\/", "/").rstrip("/.,;:")
+                if u.startswith("http://") or u.startswith("https://"):
+                    cands.append((um.start(), u))
+            if not cands:
+                continue
+            for _, u in cands:
+                if low_name in u.lower():
+                    return u
+            pos = m.start() - wstart
+            after = [u for p, u in cands if p >= pos]
+            before = [u for p, u in cands if p < pos]
+            if after:
+                return after[0]
+            if before:
+                return before[-1]
+    return ""
+
+
+def _search_fetch_url(url):
+    """搜索用拉取地址：modelscope dataset view 页面 URL 转 API 地址。"""
+    m = _MS_DATASET_VIEW_RE.search(url)
+    if m:
+        return ("https://www.modelscope.cn/api/v1/datasets/" + m.group(1) + "/" + m.group(2)
+                + "/repo?Revision=" + m.group(3) + "&FilePath=" + urllib.parse.quote(m.group(4)))
+    return url
+
+
 def _list_repo_files(owner, name, revision, path):
     api_url = f"https://www.modelscope.cn/api/v1/models/{owner}/{name}/repo/files"
     params = {"Revision": revision, "Recursive": "true"}
@@ -811,6 +857,55 @@ def register_server_routes():
         except Exception as e:
             return web.json_response({"error": f"列文件失败: {e}", "files": []})
         return web.json_response({"files": files, "model_id": f"{owner}/{name}"})
+
+    @routes.post("/qibo/modelscope/search_text")
+    async def ms_search_text(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        urls = []
+        for u in (payload.get("urls") or []):
+            if isinstance(u, str) and u.strip() and u.strip() not in urls:
+                urls.append(u.strip())
+        names = []
+        for n in (payload.get("names") or []):
+            if not isinstance(n, str):
+                continue
+            base = n.replace("\\", "/").split("/")[-1].strip()
+            if base and base not in names:
+                names.append(base)
+        if not urls or not names:
+            return web.json_response({"matches": []})
+
+        async def _fetch_one(u):
+            try:
+                return u, await asyncio.to_thread(_fetch_url_text, _search_fetch_url(u))
+            except Exception:
+                return u, ""
+
+        pairs = await asyncio.gather(*(_fetch_one(u) for u in urls))
+        texts = [(u, t) for u, t in pairs if t]
+        links = []
+        for name in names:
+            for src, t in texts:
+                u = _find_link_near(t, name)
+                if u:
+                    links.append((name, u, src))
+                    break
+
+        async def _head_one(u):
+            try:
+                return await asyncio.to_thread(_head_resolve_file, _to_hf_mirror(u))
+            except Exception:
+                return 0
+
+        uniq_urls = list(dict.fromkeys(u for _, u, _ in links))
+        sizes = list(await asyncio.gather(*(_head_one(u) for u in uniq_urls))) if uniq_urls else []
+        size_map = dict(zip(uniq_urls, sizes))
+        matches = [{"name": name, "direct_url": u, "size": size_map.get(u) or 0, "source": src}
+                   for name, u, src in links]
+        return web.json_response({"matches": matches})
 
     @routes.post("/qibo/fetch_text")
     async def qibo_fetch_text(request):

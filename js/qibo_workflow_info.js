@@ -624,7 +624,7 @@ app.registerExtension({
             };
 
             const fetchUrlModelFiles = async () => {
-                const result = { files: [], errors: [] };
+                const result = { files: [], errors: [], dataUrls: [] };
                 try {
                     const tr = await fetch("/qibo/fetch_text", {
                         method: "POST",
@@ -635,6 +635,7 @@ app.registerExtension({
                     const tjson = await tr.json();
                     if (tjson.error) { result.errors.push("url_model.txt: " + tjson.error); return result; }
                     const listUrls = parseRepoUrls(tjson.text || "");
+                    result.dataUrls = listUrls;
                     for (const listUrl of listUrls) {
                         const mm = listUrl.match(/modelscope\.cn\/datasets\/([^\/]+)\/([^\/]+)\/file\/view\/([^\/]+)\/([^?]+)/);
                         if (mm) {
@@ -705,6 +706,7 @@ app.registerExtension({
                 const rawUrls = parseRepoUrls(msRepoWidget.value || "");
                 let allFiles = [];
                 let repoErrors = [];
+                let umDataUrls = [];
                 for (const repoUrl of rawUrls) {
                     try {
                         const lr = await fetch("/qibo/modelscope/list_files", {
@@ -723,9 +725,11 @@ app.registerExtension({
                     const um = await fetchUrlModelFiles();
                     for (const e of um.errors) repoErrors.push(e);
                     allFiles = allFiles.concat(um.files);
+                    umDataUrls = um.dataUrls || [];
                 }
                 let matched = [];
                 let unmatched = [];
+                let unmatchedItems = [];
                 const usedFileSet = new Set();
                 for (const m of uniqMiss) {
                     const wantName = m.value;
@@ -773,7 +777,61 @@ app.registerExtension({
                         f.rename_to = "";
                         f.rename_from = "";
                         matched.push(f);
-                    } else unmatched.push(m.orig_value || (wantSub ? wantSub + "/" + wantName : wantName));
+                    } else {
+                        const baseName = (wantName || "").split(/[\\/]/).pop() || wantName;
+                        unmatchedItems.push({
+                            name: baseName,
+                            folder: m.folder || "",
+                            subpath: wantSub,
+                            orig_value: m.orig_value || "",
+                            label: m.orig_value || (wantSub ? wantSub + "/" + wantName : wantName),
+                        });
+                    }
+                }
+                if (unmatchedItems.length > 0) {
+                    const dataUrls = [];
+                    for (const u of rawUrls) if (u && !dataUrls.includes(u)) dataUrls.push(u);
+                    for (const u of umDataUrls) if (u && !dataUrls.includes(u)) dataUrls.push(u);
+                    if (dataUrls.length > 0) {
+                        try {
+                            const sr = await fetch("/qibo/modelscope/search_text", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ urls: dataUrls, names: unmatchedItems.map(x => x.name) }),
+                            });
+                            if (!sr.ok) { repoErrors.push(`文本搜索: HTTP ${sr.status}`); }
+                            const sj = sr.ok ? await sr.json() : null;
+                            const foundMap = new Map();
+                            for (const mm of ((sj && sj.matches) || [])) {
+                                if (mm && mm.name && mm.direct_url) foundMap.set(mm.name, mm);
+                            }
+                            for (const item of unmatchedItems) {
+                                const hit = foundMap.get(item.name);
+                                if (hit) {
+                                    matched.push({
+                                        name: item.name,
+                                        local_folder: item.folder || "",
+                                        subpath: item.subpath || "",
+                                        size: hit.size || 0,
+                                        direct_url: hit.direct_url,
+                                        local_exists: false,
+                                        _repo: "(文本搜索)",
+                                        rename_to: "",
+                                        rename_from: "",
+                                        orig_value: item.orig_value,
+                                        is_text_search: true,
+                                    });
+                                } else {
+                                    unmatched.push(item.label);
+                                }
+                            }
+                        } catch (e) {
+                            repoErrors.push("文本搜索: " + e);
+                            for (const item of unmatchedItems) unmatched.push(item.label);
+                        }
+                    } else {
+                        for (const item of unmatchedItems) unmatched.push(item.label);
+                    }
                 }
                 const presentModels = (res.present_models || []).filter(m => !m.is_placeholder);
                 const seenPresent = new Set();
@@ -819,7 +877,8 @@ app.registerExtension({
                     }
                     const { uniqMiss, matched, unmatched, repoErrors } = result;
                     diag.push(`缺失模型 ${uniqMiss.length} 个:`);
-                    for (const m of uniqMiss) {
+
+                for (const m of uniqMiss) {
                         if (m.is_placeholder) {
                             diag.push(`  ⚠ models/${m.folder || "?"}/  (占位提示，文件名未知)`);
                             diag.push(`     提示: ${m.orig_value || `（请把模型放到 models/${m.folder}）`}`);
@@ -839,9 +898,9 @@ app.registerExtension({
                         const wantSubPath = (f.orig_value || "").includes("/") ? (f.orig_value || "").split("/").slice(0, -1).join("/") : "";
                         const sameWant = (wantBase === localName) && (!wantSubPath || wantSubPath === f.subpath);
                         if (!sameWant) {
-                            diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}  ← 工作流需求: ${f.orig_value || "?"}`);
+                            diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}  ← 工作流需求: ${f.orig_value || "?"}${f.is_text_search ? "  (文本搜索)" : ""}`);
                         } else {
-                            diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}`);
+                            diag.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}${f.is_text_search ? "  (文本搜索)" : ""}`);
                         }
                     }
                     if (localPresent.length > 0) {
@@ -1339,7 +1398,7 @@ app.registerExtension({
                             if (f.rename_to && f.rename_to !== f.name) {
                                 logLines.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}  (原名: ${f.name})`);
                             } else {
-                                logLines.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}`);
+                                logLines.push(`  ✓ models/${f.local_folder || "?"}/${rel}  ${fmtSize(f.size)}${f.is_text_search ? "  (文本搜索)" : ""}`);
                             }
                         }
                         for (const f of lpMatched) {
