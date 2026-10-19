@@ -637,22 +637,43 @@ app.registerExtension({
                     const listUrls = parseRepoUrls(tjson.text || "");
                     for (const listUrl of listUrls) {
                         const mm = listUrl.match(/modelscope\.cn\/datasets\/([^\/]+)\/([^\/]+)\/file\/view\/([^\/]+)\/([^?]+)/);
-                        if (!mm) continue;
-                        const apiUrl = "https://www.modelscope.cn/api/v1/datasets/" + mm[1] + "/" + mm[2] + "/repo?Revision=" + mm[3] + "&FilePath=" + mm[4];
-                        const jr = await fetch(apiUrl);
-                        if (!jr.ok) continue;
-                        const j = await jr.json();
-                        for (const mdl of (j.models || [])) {
-                            for (const f of (mdl.files || [])) {
+                        if (mm) {
+                            const apiUrl = "https://www.modelscope.cn/api/v1/datasets/" + mm[1] + "/" + mm[2] + "/repo?Revision=" + mm[3] + "&FilePath=" + mm[4];
+                            const jr = await fetch(apiUrl);
+                            if (!jr.ok) continue;
+                            const j = await jr.json();
+                            for (const mdl of (j.models || [])) {
+                                for (const f of (mdl.files || [])) {
+                                    result.files.push({
+                                        name: f.name,
+                                        size: f.size || 0,
+                                        direct_url: f.download_url,
+                                        local_exists: false,
+                                        _repo: mdl.model_id,
+                                    });
+                                }
+                            }
+                            continue;
+                        }
+                        try {
+                            const rr = await fetch("/qibo/modelscope/list_files", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ url: listUrl }),
+                            });
+                            if (!rr.ok) continue;
+                            const rj = await rr.json();
+                            if (rj.error) continue;
+                            for (const f of (rj.files || [])) {
                                 result.files.push({
                                     name: f.name,
                                     size: f.size || 0,
-                                    direct_url: f.download_url,
+                                    direct_url: f.direct_url,
                                     local_exists: false,
-                                    _repo: mdl.model_id,
+                                    _repo: rj.model_id || listUrl,
                                 });
                             }
-                        }
+                        } catch (e) { result.errors.push(listUrl + ": " + e); }
                     }
                 } catch (e) { result.errors.push("url_model.txt: " + e); }
                 return result;
@@ -735,13 +756,15 @@ app.registerExtension({
                         continue;
                     }
                     const fileKey = (x) => x.direct_url || (x._repo + "/" + x.name);
-                    const pickFile = (wantName) => {
+                    const pickFile = (wantName, wantFolder) => {
                         const isFree = (x) => !usedFileSet.has(fileKey(x));
-                        let cands = allFiles.filter(x => x.name === wantName && isFree(x));
+                        const wf = (wantFolder || "").toLowerCase();
+                        let cands = wf ? allFiles.filter(x => x.name === wantName && x.local_folder && x.local_folder.toLowerCase() === wf && isFree(x)) : [];
+                        if (cands.length === 0) cands = allFiles.filter(x => x.name === wantName && isFree(x));
                         if (cands.length === 0) cands = allFiles.filter(x => x.name && wantName && x.name.toLowerCase() === wantName.toLowerCase() && isFree(x));
                         return cands[0] || null;
                     };
-                    let f = wantName ? pickFile(wantName) : null;
+                    let f = wantName ? pickFile(wantName, m.folder) : null;
                     if (f) {
                         usedFileSet.add(fileKey(f));
                         if (!f.local_folder && m.folder) f.local_folder = m.folder;
@@ -1692,7 +1715,9 @@ app.registerExtension({
                     }
                     const matchOne = (m, pool) => {
                         if (!m.value) return null;
-                        let f = pool.find(x => x.name === m.value);
+                        const wf = (m.folder || "").toLowerCase();
+                        let f = wf ? pool.find(x => x.name === m.value && x.local_folder && x.local_folder.toLowerCase() === wf) : null;
+                        if (!f) f = pool.find(x => x.name === m.value);
                         if (!f) f = pool.find(x => x.name && x.name.toLowerCase() === m.value.toLowerCase());
                         return f;
                     };

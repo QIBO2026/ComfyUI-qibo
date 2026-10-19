@@ -281,13 +281,14 @@ def _parse_resolve_url(url):
     """识别单文件直链:
     - HF 兼容: {base}/{owner}/{name}/resolve/{rev}/{fpath}
     - ModelScope: modelscope.cn/{owner}/{name}/resolve/{rev}/{fpath}
+                  modelscope.cn/models/{owner}/{name}/resolve/{rev}/{fpath}
     返回 (owner, name, rev, fpath, source, base_url) 或 None。
     """
     uo = urllib.parse.urlsplit(url)
     host = (uo.hostname or "").lower()
     path = uo.path
     if "modelscope.cn" in host:
-        m = re.match(r'^/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/resolve/([A-Za-z0-9_.-]+)/(.+)$', path)
+        m = re.match(r'^/(?:models/)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/resolve/([A-Za-z0-9_.-]+)/(.+)$', path)
         if m:
             return m.group(1), m.group(2), m.group(3), m.group(4), "modelscope", "https://www.modelscope.cn"
     m = re.match(r'^/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/resolve/([A-Za-z0-9_.-]+)/(.+)$', path)
@@ -320,6 +321,112 @@ def _guess_local_folder(fpath, folder_keys):
             return part
     parent = os.path.basename(os.path.dirname(fpath))
     return parent if parent in folder_keys else None
+
+
+_MANIFEST_TEXT_EXTS = (".json", ".txt", ".tsv", ".csv", ".md")
+_MS_DATASET_VIEW_RE = re.compile(r'modelscope\.cn/datasets/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/file/view/([^/?#]+)/([^?#]+)')
+
+
+def _fetch_url_text(url):
+    r = requests.get(url, headers={"User-Agent": UA}, timeout=30, allow_redirects=True)
+    r.raise_for_status()
+    return r.text
+
+
+def _mark_local_exists(files):
+    for f in files:
+        f["local_exists"] = False
+        folder = f.get("local_folder")
+        if folder:
+            dest_dir = _resolve_dest_dir(folder)
+            if dest_dir and os.path.exists(os.path.join(dest_dir, f.get("name") or "")):
+                f["local_exists"] = True
+    return files
+
+
+def _parse_manifest_text(text, folder_keys):
+    """解析清单文本为文件列表。支持:
+    - JSON: {"models":[{"model_id","files":[{"name","size","download_url"}]}]}
+    - TSV: 目录<TAB>文件名<TAB>大小(字节)<TAB>下载URL (大小/URL 列可空)
+    - 单列 URL 行: 从 resolve 直链推断目录与文件名
+    返回文件列表或 None。
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+    if t[0] in "{[":
+        try:
+            data = json.loads(t)
+        except Exception:
+            data = None
+        if data is not None:
+            files = []
+            models = data.get("models") if isinstance(data, dict) else data
+            if isinstance(models, list):
+                for mdl in models:
+                    if not isinstance(mdl, dict):
+                        continue
+                    for f in (mdl.get("files") or []):
+                        if not isinstance(f, dict):
+                            continue
+                        fname = os.path.basename(f.get("name") or "")
+                        if not fname:
+                            continue
+                        fpath = (f.get("name") or fname).replace("\\", "/")
+                        files.append({
+                            "path": fpath,
+                            "name": fname,
+                            "size": f.get("size") or 0,
+                            "parent_dir": os.path.dirname(fpath),
+                            "local_folder": _guess_local_folder(fpath, folder_keys),
+                            "direct_url": f.get("download_url") or "",
+                        })
+                if files:
+                    return _mark_local_exists(files)
+    lines = [ln for ln in t.splitlines() if ln.strip()]
+    files = []
+    tsv_rows = 0
+    for ln in lines:
+        cols = [c.strip() for c in ln.split("\t")]
+        if len(cols) >= 2 and "." in cols[1]:
+            folder = cols[0].replace("\\", "/").strip("/")
+            if folder.lower().startswith("models/"):
+                folder = folder[len("models/"):].strip("/")
+            name = os.path.basename(cols[1].replace("\\", "/"))
+            size = int(cols[2]) if len(cols) >= 3 and cols[2].isdigit() else 0
+            durl = cols[3] if len(cols) >= 4 else ""
+            if folder and folder in folder_keys:
+                local_folder = folder
+            elif folder:
+                local_folder = _guess_local_folder(folder + "/" + name, folder_keys) or folder
+            else:
+                local_folder = _guess_local_folder(name, folder_keys)
+            files.append({
+                "path": (folder + "/" + name) if folder else name,
+                "name": name,
+                "size": size,
+                "parent_dir": folder or "",
+                "local_folder": local_folder,
+                "direct_url": durl,
+            })
+            tsv_rows += 1
+        elif len(cols) == 1 and cols[0].lower().startswith("http"):
+            rp = _parse_resolve_url(cols[0])
+            if rp:
+                owner, rname, rev, fpath, source, base_url = rp
+                name = os.path.basename(fpath)
+                files.append({
+                    "path": fpath,
+                    "name": name,
+                    "size": 0,
+                    "parent_dir": os.path.basename(os.path.dirname(fpath)),
+                    "local_folder": _guess_local_folder(fpath, folder_keys),
+                    "direct_url": f"{base_url}/{owner}/{rname}/resolve/{rev}/{fpath}",
+                })
+                tsv_rows += 1
+    if tsv_rows > 0:
+        return _mark_local_exists(files)
+    return None
 
 
 def _list_repo_files(owner, name, revision, path):
@@ -637,9 +744,19 @@ def register_server_routes():
         if rparsed:
             owner, name, rev, fpath, source, base_url = rparsed
             if source == "huggingface":
-                base_url = _to_hf_mirror(base_url)
-            fname = os.path.basename(fpath)
-            direct_url = f"{base_url}/{owner}/{name}/resolve/{rev}/{fpath}"
+                direct_url = f"{_to_hf_mirror(base_url)}/{owner}/{name}/resolve/{rev}/{fpath}"
+            else:
+                direct_url = url
+            ext = os.path.splitext(fpath)[1].lower()
+            if ext in _MANIFEST_TEXT_EXTS:
+                try:
+                    text = await asyncio.to_thread(_fetch_url_text, direct_url)
+                except Exception as e:
+                    return web.json_response({"error": f"拉取清单文件失败: {e}", "files": []})
+                files = _parse_manifest_text(text, folder_keys)
+                if files is None:
+                    return web.json_response({"error": f"清单文件内容无法解析（支持 JSON / TSV 目录<TAB>文件名<TAB>大小<TAB>URL）: {direct_url}", "files": []})
+                return web.json_response({"files": files, "model_id": f"{owner}/{name}/{fname}"})
             size = await asyncio.to_thread(_head_resolve_file, direct_url)
             local_folder = _guess_local_folder(fpath, folder_keys)
             parent = os.path.basename(os.path.dirname(fpath))
@@ -662,7 +779,27 @@ def register_server_routes():
             })
         parsed = _parse_repo_url(url)
         if not parsed:
-            return web.json_response({"error": "无法解析仓库 URL（支持 modelscope.cn / 任意 HF 兼容站点 /{owner}/{repo} / resolve 单文件直链）", "files": []})
+            m = _MS_DATASET_VIEW_RE.search(url)
+            if m:
+                api = ("https://www.modelscope.cn/api/v1/datasets/" + m.group(1) + "/" + m.group(2)
+                       + "/repo?Revision=" + m.group(3) + "&FilePath=" + urllib.parse.quote(m.group(4)))
+                try:
+                    text = await asyncio.to_thread(_fetch_url_text, api)
+                except Exception as e:
+                    return web.json_response({"error": f"modelscope dataset 拉取失败: {e}", "files": []})
+                files = _parse_manifest_text(text, folder_keys)
+                if files is not None:
+                    return web.json_response({"files": files, "model_id": f"{m.group(1)}/{m.group(2)}/{m.group(4)}"})
+                return web.json_response({"error": "modelscope dataset 返回内容无法解析为清单", "files": []})
+            try:
+                text = await asyncio.to_thread(_fetch_url_text, url)
+            except Exception:
+                text = ""
+            if text:
+                files = _parse_manifest_text(text, folder_keys)
+                if files is not None:
+                    return web.json_response({"files": files, "model_id": url})
+            return web.json_response({"error": "无法解析 URL（支持 modelscope 仓库/直链/dataset 清单、HF 兼容站点、JSON/TSV 文本清单直链）", "files": []})
         owner, name, rev, path, source, base_url = parsed
         try:
             if source == "huggingface":
