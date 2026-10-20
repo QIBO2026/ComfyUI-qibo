@@ -157,7 +157,9 @@ function showMoveDialog(node) {
                 const scopeFolders = new Set(scope.map((it) => it.m.folder));
                 const menu = document.createElement("div");
                 menu.id = "qibo-move-folder-menu";
-                menu.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:99999;background:${COL_BG};border:1px solid ${COL_BORDER};border-radius:4px;padding:4px 0;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size:12px;min-width:180px;max-height:340px;overflow-y:auto;`;
+                const mx = Math.min(e.clientX, Math.max(10, window.innerWidth - 200));
+                const my = Math.min(e.clientY, Math.max(10, window.innerHeight - 360));
+                menu.style.cssText = `position:fixed;left:${mx}px;top:${my}px;z-index:100002;background:${COL_BG};border:1px solid ${COL_BORDER};border-radius:4px;padding:4px 0;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size:12px;min-width:180px;max-height:340px;overflow-y:auto;`;
                 const mt = document.createElement("div");
                 mt.style.cssText = `color:${COL_DIM};padding:4px 12px;border-bottom:1px solid ${COL_BORDER};margin-bottom:2px;position:sticky;top:0;background:${COL_BG};`;
                 mt.textContent = scopeFolders.size > 1 ? `移动 ${scope.length} 个模型到目录` : `移动 ${scope.length} 个模型到目录（当前: ${[...scopeFolders][0]}）`;
