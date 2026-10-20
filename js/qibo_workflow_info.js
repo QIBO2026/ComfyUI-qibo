@@ -1820,6 +1820,7 @@ app.registerExtension({
                     updateWidget();
                     const rawUrls = parseRepoUrls(msRepoWidget.value || "");
                     let allFiles = [];
+                    let umDataUrls = [];
                     for (let u = 0; u < rawUrls.length; u++) {
                         try {
                             const lr = await fetchJson("/qibo/modelscope/list_files", {
@@ -1861,6 +1862,7 @@ app.registerExtension({
                         logLines.push(`第一轮匹配 ${matched.length}/${uniqAll.length}，剩余 ${unmatched.length} 个未匹配，从 url_model.txt 拉取兜底地址中...`);
                         updateWidget();
                         const um = await fetchUrlModelFiles();
+                        umDataUrls = um.dataUrls || [];
                         if (um.files.length > 0) {
                             const stillUnmatched = [];
                             for (const m of unmatched) {
@@ -1883,6 +1885,41 @@ app.registerExtension({
                         }
                         if (um.errors.length > 0) {
                             for (const e of um.errors) logLines.push(`  ⚠ ${e}`);
+                        }
+                    }
+                    if (unmatched.length > 0) {
+                        const dataUrls = [];
+                        for (const u of rawUrls) if (u && !dataUrls.includes(u)) dataUrls.push(u);
+                        for (const u of umDataUrls) if (u && !dataUrls.includes(u)) dataUrls.push(u);
+                        if (dataUrls.length > 0) {
+                            logLines.push(`文本搜索匹配剩余 ${unmatched.length} 个未匹配模型中...`);
+                            updateWidget();
+                            try {
+                                const sr = await fetch("/qibo/modelscope/search_text", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ urls: dataUrls, names: unmatched.map(x => (x.value || "").split(/[\\/]/).pop() || x.value) }),
+                                });
+                                const sj = sr.ok ? await sr.json() : null;
+                                const foundMap = new Map();
+                                for (const mm of ((sj && sj.matches) || [])) {
+                                    if (mm && mm.name && mm.direct_url) foundMap.set(mm.name, mm);
+                                }
+                                const stillUnmatched = [];
+                                for (const m of unmatched) {
+                                    const baseName = (m.value || "").split(/[\\/]/).pop() || m.value;
+                                    const hit = foundMap.get(baseName);
+                                    if (hit) {
+                                        matched.push({ name: baseName, direct_url: hit.direct_url, folder: m.folder || "checkpoints", size: hit.size || 0, subpath: m.subpath || "", orig_value: m.orig_value || m.value, rename_to: "" });
+                                        logLines.push(`  ↳ 文本搜索匹配: ${baseName}  ${hit.size ? fmtSize(hit.size) : ""}`);
+                                    } else {
+                                        stillUnmatched.push(m);
+                                    }
+                                }
+                                unmatched = stillUnmatched;
+                            } catch (e) {
+                                logLines.push(`  ⚠ 文本搜索失败: ${e}`);
+                            }
                         }
                     }
                     logLines.push(`匹配 ${matched.length}/${uniqAll.length} 个:`);
