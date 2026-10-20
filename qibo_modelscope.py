@@ -947,6 +947,15 @@ def register_server_routes():
                    for name, u, src in links]
         return web.json_response({"matches": matches})
 
+    @routes.get("/qibo/model_folders")
+    async def qibo_model_folders(request):
+        try:
+            import folder_paths as fp
+            folders = sorted(k for k in fp.folder_names_and_paths.keys() if k not in ("configs", "custom_nodes"))
+        except Exception:
+            folders = []
+        return web.json_response({"folders": folders})
+
     @routes.post("/qibo/fetch_text")
     async def qibo_fetch_text(request):
         try:

@@ -579,37 +579,62 @@ app.registerExtension({
                         itemEl.appendChild(itemInfo);
                         itemEl.appendChild(itemRight);
                         itemEl.onclick = (e) => { if (e.target.tagName === "INPUT") return; if (cb.disabled) return; cb.checked = !cb.checked; cb.style.background = cb.checked ? "#007acc" : "transparent"; };
-                        itemEl.oncontextmenu = (e) => {
+                        itemEl.oncontextmenu = async (e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             const oldm = document.getElementById("qibo-folder-menu");
                             if (oldm) oldm.remove();
                             const menu = document.createElement("div");
                             menu.id = "qibo-folder-menu";
-                            menu.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:99999;background:${COL_BG};border:1px solid ${COL_BORDER};border-radius:4px;padding:4px 0;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size:12px;min-width:160px;`;
+                            menu.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:99999;background:${COL_BG};border:1px solid ${COL_BORDER};border-radius:4px;padding:4px 0;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size:12px;min-width:180px;max-height:340px;overflow-y:auto;`;
                             const title = document.createElement("div");
-                            title.style.cssText = `color:${COL_DIM};padding:4px 12px;border-bottom:1px solid ${COL_BORDER};margin-bottom:2px;`;
+                            title.style.cssText = `color:${COL_DIM};padding:4px 12px;border-bottom:1px solid ${COL_BORDER};margin-bottom:2px;position:sticky;top:0;background:${COL_BG};`;
                             title.textContent = "下载到目录";
                             menu.appendChild(title);
                             const curFolder = f.local_folder || "checkpoints";
-                            for (const fd of FOLDERS) {
-                                const opt = document.createElement("div");
-                                opt.style.cssText = `padding:5px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;color:${COL_FG};`;
-                                opt.onmouseover = () => { opt.style.background = "#007acc"; opt.style.color = "#fff"; };
-                                opt.onmouseout = () => { opt.style.background = "transparent"; opt.style.color = COL_FG; };
-                                const mark = document.createElement("span");
-                                mark.style.cssText = "width:14px;color:#4caf50;";
-                                mark.textContent = (fd === curFolder) ? "✓" : "";
-                                const txt = document.createElement("span");
-                                txt.textContent = fd;
-                                opt.appendChild(mark);
-                                opt.appendChild(txt);
-                                opt.onclick = (ev) => {
-                                    ev.stopPropagation();
-                                    f.local_folder = fd;
-                                    menu.remove();
-                                    renderFilesInRightPanel(allFiles, emptyText);
-                                };
+                            const renderOptions = (folders) => {
+                                for (const el of Array.from(menu.children)) { if (el !== title) el.remove(); }
+                                const list = folders.slice();
+                                if (curFolder && !list.includes(curFolder)) list.unshift(curFolder);
+                                for (const fd of list) {
+                                    const opt = document.createElement("div");
+                                    opt.style.cssText = `padding:5px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;color:${COL_FG};`;
+                                    opt.onmouseover = () => { opt.style.background = "#007acc"; opt.style.color = "#fff"; };
+                                    opt.onmouseout = () => { opt.style.background = "transparent"; opt.style.color = COL_FG; };
+                                    const mark = document.createElement("span");
+                                    mark.style.cssText = `width:14px;color:#4caf50;flex-shrink:0;`;
+                                    mark.textContent = (fd === curFolder) ? "✓" : "";
+                                    const txt = document.createElement("span");
+                                    txt.textContent = fd;
+                                    txt.title = "models/" + fd;
+                                    opt.appendChild(mark);
+                                    opt.appendChild(txt);
+                                    opt.onclick = (ev) => {
+                                        ev.stopPropagation();
+                                        f.local_folder = fd;
+                                        menu.remove();
+                                        renderFilesInRightPanel(allFiles, emptyText);
+                                    };
+                                    menu.appendChild(opt);
+                                }
+                            };
+                            renderOptions(self.__qiboAllFolders || FOLDERS);
+                            document.body.appendChild(menu);
+                            const closeMenu = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("mousedown", closeMenu); } };
+                            setTimeout(() => document.addEventListener("mousedown", closeMenu), 0);
+                            if (!self.__qiboAllFolders) {
+                                try {
+                                    const r = await fetch("/qibo/model_folders");
+                                    if (r.ok && menu.isConnected) {
+                                        const j = await r.json();
+                                        if (j.folders && j.folders.length > 0) {
+                                            self.__qiboAllFolders = j.folders;
+                                            renderOptions(j.folders);
+                                        }
+                                    }
+                                } catch (err) { }
+                            }
+                        };
                                 menu.appendChild(opt);
                             }
                             document.body.appendChild(menu);
