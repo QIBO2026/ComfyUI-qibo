@@ -361,14 +361,31 @@ def _fetch_url_text(url):
     return r.text
 
 
+def _local_matches_remote(dest, remote_size):
+    """本地文件与远程大小对比。返回 (local_exists, local_size)。
+    远程大小已知(>0)时须严格相等才算存在；未知时文件存在即算。"""
+    if not dest or not os.path.exists(dest):
+        return False, 0
+    try:
+        lsize = os.path.getsize(dest)
+    except OSError:
+        return False, 0
+    if remote_size and remote_size > 0:
+        return lsize == remote_size, lsize
+    return True, lsize
+
+
 def _mark_local_exists(files):
     for f in files:
         f["local_exists"] = False
         folder = f.get("local_folder")
         if folder:
             dest_dir = _resolve_dest_dir(folder)
-            if dest_dir and os.path.exists(os.path.join(dest_dir, f.get("name") or "")):
-                f["local_exists"] = True
+            if dest_dir:
+                ok, lsize = _local_matches_remote(os.path.join(dest_dir, f.get("name") or ""), f.get("size") or 0)
+                f["local_exists"] = ok
+                if ok and lsize and not f.get("size"):
+                    f["size"] = lsize
     return files
 
 
@@ -547,8 +564,8 @@ def _list_repo_files(owner, name, revision, path):
         local_exists = False
         if local_folder:
             dest_dir = _resolve_dest_dir(local_folder)
-            if dest_dir and os.path.exists(os.path.join(dest_dir, fname)):
-                local_exists = True
+            if dest_dir:
+                local_exists, _ls = _local_matches_remote(os.path.join(dest_dir, fname), size)
         result.append({
             "path": fpath,
             "name": fname,
@@ -590,8 +607,8 @@ def _list_hf_repo_files(owner, name, revision, path, base_url="https://hf-mirror
         local_exists = False
         if local_folder:
             dest_dir = _resolve_dest_dir(local_folder)
-            if dest_dir and os.path.exists(os.path.join(dest_dir, fname)):
-                local_exists = True
+            if dest_dir:
+                local_exists, _ls = _local_matches_remote(os.path.join(dest_dir, fname), size)
         result.append({
             "path": fpath,
             "name": fname,
@@ -639,6 +656,11 @@ def register_server_routes():
         subpath = (payload.get("subpath") or "").strip()
         subpath_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
         rename_to = (payload.get("rename_to") or "").strip()
+        remote_size = 0
+        try:
+            remote_size = int(payload.get("size") or 0)
+        except (TypeError, ValueError):
+            remote_size = 0
         if direct_url:
             direct_url = _to_hf_mirror(_clean_url(direct_url))
 
@@ -656,6 +678,18 @@ def register_server_routes():
             final_dest = dest
             if rename_to and rename_to != fname:
                 final_dest = os.path.join(os.path.dirname(dest), rename_to)
+            if os.path.exists(final_dest):
+                if remote_size <= 0:
+                    remote_size = await asyncio.to_thread(_head_resolve_file, direct_url)
+                ok, lsize = _local_matches_remote(final_dest, remote_size)
+                if ok:
+                    return web.json_response({
+                        "skipped": True,
+                        "filename": rename_to or fname,
+                        "folder": folder,
+                        "dest_path": final_dest,
+                        "size": lsize,
+                    })
             task_id = str(uuid.uuid4())
             with _task_lock:
                 _download_tasks[task_id] = {
@@ -850,8 +884,8 @@ def register_server_routes():
             local_exists = False
             if local_folder:
                 dest_dir = _resolve_dest_dir(local_folder)
-                if dest_dir and os.path.exists(os.path.join(dest_dir, fname)):
-                    local_exists = True
+                if dest_dir:
+                    local_exists, _ls = _local_matches_remote(os.path.join(dest_dir, fname), size)
             return web.json_response({
                 "files": [{
                     "path": fpath,
@@ -1011,6 +1045,18 @@ def register_server_routes():
             if rename_to and rename_to != fname:
                 final_dest = os.path.join(os.path.dirname(dest), rename_to)
             try:
+                remote_size = 0
+                try:
+                    remote_size = int(f.get("size") or 0)
+                except (TypeError, ValueError):
+                    remote_size = 0
+                if os.path.exists(final_dest):
+                    if remote_size <= 0 and direct_url:
+                        remote_size = _head_resolve_file(direct_url)
+                    ok, lsize = _local_matches_remote(final_dest, remote_size)
+                    if ok:
+                        results.append({"ok": True, "skipped": True, "name": rename_to or fname, "folder": folder, "full_path": final_dest, "size": lsize})
+                        continue
                 res = await asyncio.to_thread(_download_direct, direct_url, dest)
                 if rename_to and rename_to != fname and res.get("ok"):
                     try:

@@ -1108,6 +1108,11 @@ app.registerExtension({
                         self.setDirtyCanvas(true, true);
                         return;
                     }
+                    if (res.skipped) {
+                        widget.value = `⏭ 本地已存在且大小一致，跳过下载\n文件路径: ${res.dest_path || ""}\n大小: ${fmtSize(res.size || 0)}`;
+                        self.setDirtyCanvas(true, true);
+                        return;
+                    }
                     const lines = ["✅ 下载完成"];
                     if (res.full_path) lines.push(`文件路径: ${res.full_path}`);
                     else if (res.path) lines.push(`文件路径: ${res.path}`);
@@ -1290,6 +1295,7 @@ app.registerExtension({
                 const dlFiles = selected.map(f => ({
                     direct_url: f.direct_url,
                     name: f.name,
+                    size: f.size || 0,
                     local_folder: f.local_folder,
                     subpath: f.subpath || "",
                     rename_to: "",
@@ -1310,12 +1316,19 @@ app.registerExtension({
                         const r = await fetch("/qibo/modelscope/download", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath }),
+                            body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath, size: f.size || 0 }),
                         });
                         const res = await r.json();
                         if (res.error) {
                             logLines.push(`❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: ${res.error}`);
                             updateWidget();
+                            continue;
+                        }
+                        if (res.skipped) {
+                            okCount++;
+                            logLines.push(`⏭ [${i + 1}/${dlFiles.length}] ${fullDisp}  本地已存在且大小一致(${fmtSize(res.size || f.size || 0)})，跳过下载`);
+                            updateWidget();
+                            appendToManifest({ name: f.name, direct_url: f.direct_url, folder: res.folder || folder, size: res.size || f.size || 0, subpath });
                             continue;
                         }
                         if (!res.task_id) {
@@ -1460,10 +1473,17 @@ app.registerExtension({
                             const dr = await fetch("/qibo/modelscope/download", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath }),
+                                body: JSON.stringify({ direct_url: f.direct_url, filename: f.name, folder, subpath, size: f.size || 0 }),
                             });
                             const dres = await dr.json();
                             if (dres.error) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${fullDisp}: ${dres.error}`); updateWidget(); continue; }
+                            if (dres.skipped) {
+                                okCount++;
+                                logLines.push(`⏭ [${i + 1}/${localMissing.length}] ${fullDisp}  本地已存在且大小一致(${fmtSize(dres.size || f.size || 0)})，跳过下载`);
+                                updateWidget();
+                                appendToManifest({ name: f.name, direct_url: f.direct_url, folder: dres.folder || folder, size: dres.size || f.size || 0, subpath });
+                                continue;
+                            }
                             if (!dres.task_id) { logLines.push(`❌ [${i + 1}/${localMissing.length}] ${fullDisp}: 未返回 task_id`); updateWidget(); continue; }
                             const taskId = dres.task_id;
                             const destPath = dres.dest_path || "";
