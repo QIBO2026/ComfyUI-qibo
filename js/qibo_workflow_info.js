@@ -825,6 +825,11 @@ app.registerExtension({
                             for (const mm of ((sj && sj.matches) || [])) {
                                 if (mm && mm.name && mm.direct_url) foundMap.set(mm.name, mm);
                             }
+                            const missedMap = new Map();
+                            for (const ms of ((sj && sj.missed) || [])) {
+                                if (ms && ms.name) missedMap.set(ms.name, ms);
+                            }
+                            const badSources = ((sj && sj.sources) || []).filter(s => s && !s.ok);
                             for (const item of unmatchedItems) {
                                 const hit = foundMap.get(item.name);
                                 if (hit) {
@@ -842,15 +847,29 @@ app.registerExtension({
                                         is_text_search: true,
                                     });
                                 } else {
-                                    unmatched.push(item.label);
+                                    const ms = missedMap.get(item.name);
+                                    let why = "";
+                                    if (badSources.length > 0 && (sj && sj.sources || []).length === badSources.length) {
+                                        why = "（全部清单源拉取失败，见下方错误）";
+                                    } else if (ms && ms.name_in_text) {
+                                        why = "（清单文本中有此模型名，但附近没有下载链接）";
+                                    } else if (ms) {
+                                        why = "（清单文本中没有此模型名）";
+                                    } else if (!sj) {
+                                        why = "（文本搜索请求失败）";
+                                    }
+                                    unmatched.push(item.label + why);
                                 }
+                            }
+                            for (const s of badSources.slice(0, 3)) {
+                                repoErrors.push(`清单源拉取失败: ${s.url}${s.error ? " - " + String(s.error).slice(0, 120) : ""}`);
                             }
                         } catch (e) {
                             repoErrors.push("文本搜索: " + e);
                             for (const item of unmatchedItems) unmatched.push(item.label);
                         }
                     } else {
-                        for (const item of unmatchedItems) unmatched.push(item.label);
+                        for (const item of unmatchedItems) unmatched.push(item.label + "（无可搜索的清单源，请在左栏填仓库/清单地址）");
                     }
                 }
                 const presentModels = (res.present_models || []).filter(m => !m.is_placeholder);

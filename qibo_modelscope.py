@@ -356,7 +356,7 @@ _MS_DATASET_VIEW_RE = re.compile(r'modelscope\.cn/datasets/([A-Za-z0-9_.-]+)/([A
 
 
 def _fetch_url_text(url):
-    r = requests.get(url, headers={"User-Agent": UA}, timeout=30, allow_redirects=True)
+    r = requests.get(url, headers=_build_download_headers(url), timeout=30, allow_redirects=True)
     r.raise_for_status()
     return r.text
 
@@ -530,6 +530,59 @@ def _search_fetch_url(url):
         return ("https://www.modelscope.cn/api/v1/datasets/" + m.group(1) + "/" + m.group(2)
                 + "/repo?Revision=" + m.group(3) + "&FilePath=" + urllib.parse.quote(m.group(4)))
     return url
+
+
+_hf_size_cache = {}
+
+
+def _shorten_queries(stem):
+    """按尾部段逐步缩短生成搜索词: MysticXXX_MMH3-V1 -> MysticXXX_MMH3 -> MysticXXX。最多4级。"""
+    qs = [stem]
+    while len(qs) < 4:
+        idx = max(stem.rfind("_"), stem.rfind("-"))
+        if idx <= 0:
+            break
+        stem = stem[:idx]
+        qs.append(stem)
+    return qs
+
+
+def _hf_search_file(name):
+    """HF(hf-mirror) 全局搜索: 按文件名搜候选仓库再查文件树，basename 精确等于 name 才命中。
+    返回 (direct_url, size) 或 (None, 0)。"""
+    stem = os.path.splitext(name)[0]
+    low = name.lower()
+    seen = set()
+    for q in _shorten_queries(stem):
+        try:
+            r = requests.get("https://hf-mirror.com/api/models", params={"search": q, "limit": 8},
+                             headers={"User-Agent": UA}, timeout=20)
+            if not r.ok:
+                continue
+            items = r.json() or []
+        except Exception:
+            continue
+        repos = []
+        for it in items:
+            rid = it.get("id") or it.get("modelId")
+            if rid and rid not in seen:
+                seen.add(rid)
+                repos.append(rid)
+        for repo in repos[:8]:
+            try:
+                r2 = requests.get(f"https://hf-mirror.com/api/models/{repo}/tree/main",
+                                  params={"recursive": "true"}, headers={"User-Agent": UA}, timeout=20)
+                if not r2.ok:
+                    continue
+                for f in (r2.json() or []):
+                    if f.get("type") != "file":
+                        continue
+                    p = (f.get("path") or "").strip("/")
+                    if p.lower().rsplit("/", 1)[-1] == low:
+                        return f"https://hf-mirror.com/{repo}/resolve/main/{p}", f.get("size") or 0
+            except Exception:
+                continue
+    return None, 0
 
 
 def _list_repo_files(owner, name, revision, path):
@@ -950,25 +1003,63 @@ def register_server_routes():
             if base and base not in names:
                 names.append(base)
         if not urls or not names:
-            return web.json_response({"matches": []})
+            return web.json_response({"matches": [], "sources": [], "missed": []})
 
         async def _fetch_one(u):
             try:
-                return u, await asyncio.to_thread(_fetch_url_text, _search_fetch_url(u))
-            except Exception:
-                return u, ""
+                return u, await asyncio.to_thread(_fetch_url_text, _search_fetch_url(u)), ""
+            except Exception as e:
+                return u, "", str(e)
 
         pairs = await asyncio.gather(*(_fetch_one(u) for u in urls))
-        texts = [(u, t) for u, t in pairs if t]
+        texts = [(u, t) for u, t, _ in pairs if t]
+        sources = [{"url": u, "ok": bool(t), "text_len": len(t or ""), "error": err or ""}
+                   for u, t, err in pairs]
+
+        def _name_in_text(t, name):
+            if name in t:
+                return True
+            try:
+                return re.search(re.escape(name), t, re.IGNORECASE) is not None
+            except Exception:
+                return False
+
         links = []
+        missed = []
         for name in names:
+            hit_url = ""
+            hit_src = ""
+            name_seen = False
             for src, t in texts:
+                if not name_seen and _name_in_text(t, name):
+                    name_seen = True
                 u = _find_link_near(t, name)
                 if u:
-                    links.append((name, u, src))
+                    hit_url, hit_src = u, src
                     break
+            if hit_url:
+                links.append((name, hit_url, hit_src))
+            else:
+                missed.append({"name": name, "name_in_text": name_seen})
+
+        if missed:
+            async def _hf_one(ms):
+                u, sz = await asyncio.to_thread(_hf_search_file, ms["name"])
+                return ms["name"], u, sz
+            hf_results = await asyncio.gather(*(_hf_one(ms) for ms in missed))
+            still_missed = []
+            for ms, (n, u, sz) in zip(missed, hf_results):
+                if u:
+                    links.append((n, u, "HF文件搜索"))
+                    if sz:
+                        _hf_size_cache.setdefault(u, sz)
+                else:
+                    still_missed.append(ms)
+            missed = still_missed
 
         async def _head_one(u):
+            if u in _hf_size_cache:
+                return _hf_size_cache[u]
             try:
                 return await asyncio.to_thread(_head_resolve_file, _to_hf_mirror(_clean_url(u)))
             except Exception:
@@ -979,7 +1070,7 @@ def register_server_routes():
         size_map = dict(zip(uniq_urls, sizes))
         matches = [{"name": name, "direct_url": u, "size": size_map.get(u) or 0, "source": src}
                    for name, u, src in links]
-        return web.json_response({"matches": matches})
+        return web.json_response({"matches": matches, "sources": sources, "missed": missed})
 
     @routes.get("/qibo/model_folders")
     async def qibo_model_folders(request):
