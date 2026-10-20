@@ -127,6 +127,23 @@ def _resolve_dest_dir(folder):
 
 
 HF_MIRROR_HOST = "hf-mirror.com"
+AIFASTHUB_HOST = "aifasthub.com"
+_SLOW_SWITCH_THRESHOLD = 1024 * 1024
+_SLOW_SWITCH_MIN_BYTES = 4 * 1024 * 1024
+_SLOW_SWITCH_MIN_SECONDS = 5.0
+
+
+def _is_hf_url(url):
+    try:
+        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    except Exception:
+        return False
+    return host in (HF_MIRROR_HOST, "huggingface.co")
+
+
+def _to_aifasthub(url):
+    parsed = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit(parsed._replace(scheme="https", netloc=AIFASTHUB_HOST))
 
 
 def _to_hf_mirror(url):
@@ -166,14 +183,25 @@ def _stream_get(url, timeout=1200):
 
 
 def _download_direct(url, dest_path, timeout=1200):
+    return _download_direct_inner(url, dest_path, timeout, allow_switch=True)
+
+
+def _download_direct_inner(url, dest_path, timeout, allow_switch):
     r = _stream_get(url, timeout)
     total = int(r.headers.get("Content-Length", 0))
     done = 0
+    start_time = time.time()
     with open(dest_path, "wb") as f:
         for chunk in r.iter_content(1024 * 1024):
             if chunk:
                 f.write(chunk)
                 done += len(chunk)
+                now = time.time()
+                if (allow_switch and _is_hf_url(url) and total > _SLOW_SWITCH_MIN_BYTES
+                        and now - start_time >= _SLOW_SWITCH_MIN_SECONDS
+                        and done / (now - start_time) < _SLOW_SWITCH_THRESHOLD):
+                    r.close()
+                    return _download_direct_inner(_to_aifasthub(url), dest_path, timeout, allow_switch=False)
     return {"ok": True, "path": dest_path, "size": os.path.getsize(dest_path), "downloaded": done}
 
 
@@ -182,6 +210,10 @@ _task_lock = threading.Lock()
 
 
 def _download_direct_with_progress(url, dest_path, task_id, timeout=1200):
+    return _download_with_progress_inner(url, dest_path, task_id, timeout, allow_switch=True)
+
+
+def _download_with_progress_inner(url, dest_path, task_id, timeout, allow_switch):
     try:
         r = _stream_get(url, timeout)
     except Exception as e:
@@ -212,6 +244,7 @@ def _download_direct_with_progress(url, dest_path, task_id, timeout=1200):
             t["start_time"] = start_time
             t["status"] = "downloading"
     cancelled = False
+    switched = False
     with open(dest_path, "wb") as f:
         for chunk in r.iter_content(1024 * 1024):
             if chunk:
@@ -231,6 +264,24 @@ def _download_direct_with_progress(url, dest_path, task_id, timeout=1200):
                         cutoff = now - 3
                         while rc and rc[0][0] < cutoff:
                             rc.pop(0)
+                if (allow_switch and _is_hf_url(url) and total > _SLOW_SWITCH_MIN_BYTES
+                        and now - start_time >= _SLOW_SWITCH_MIN_SECONDS
+                        and done / (now - start_time) < _SLOW_SWITCH_THRESHOLD):
+                    switched = True
+                    break
+    if switched:
+        try:
+            r.close()
+        except Exception:
+            pass
+        with _task_lock:
+            t = _download_tasks.get(task_id)
+            if t:
+                t["status"] = "connecting"
+                t["downloaded"] = 0
+                t["mirror_note"] = f"速度低于 {_SLOW_SWITCH_THRESHOLD // 1024 // 1024}MB/s，已切换 {AIFASTHUB_HOST} 镜像重试"
+                t["recent_chunks"] = []
+        return _download_with_progress_inner(_to_aifasthub(url), dest_path, task_id, timeout, allow_switch=False)
     if cancelled:
         try:
             if os.path.exists(dest_path):
@@ -899,6 +950,7 @@ def register_server_routes():
                 "speed": speed,
                 "percent": percent,
                 "error": t["error"],
+                "mirror_note": t.get("mirror_note") or "",
             })
     @routes.post("/qibo/modelscope/cancel_download")
     async def ms_cancel_download(request):

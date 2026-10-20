@@ -1386,7 +1386,7 @@ app.registerExtension({
                                 }
                                 if (pres.status === "done") {
                                     okCount++;
-                                    logLines[lineIdx] = `✓ [${i + 1}/${dlFiles.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`;
+                                    logLines[lineIdx] = `✓ [${i + 1}/${dlFiles.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]${pres.mirror_note ? "  🔄 " + pres.mirror_note : ""}`;
                                     updateWidget();
                                     appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath });
                                     break;
@@ -1405,7 +1405,7 @@ app.registerExtension({
                                 const dl = fmtSize(pres.downloaded);
                                 const tot = pres.total > 0 ? fmtSize(pres.total) : "未知";
                                 const spd = fmtSize(pres.speed);
-                                logLines[lineIdx] = `⏳ [${i + 1}/${dlFiles.length}] ${fullDisp}  ${dl}/${tot}  ${pct}%  ${spd}/s`;
+                                logLines[lineIdx] = `⏳ [${i + 1}/${dlFiles.length}] ${fullDisp}  ${dl}/${tot}  ${pct}%  ${spd}/s${pres.mirror_note ? "  🔄 " + pres.mirror_note : ""}`;
                                 updateWidget();
                             } catch (e2) {
                                 logLines[lineIdx] = `❌ [${i + 1}/${dlFiles.length}] ${fullDisp}: 轮询失败 ${e2}`;
@@ -1523,13 +1523,13 @@ app.registerExtension({
                                     const pres = await pr.json();
                                     if (pres.status === "cancelled") { cancelledByUser = true; logLines[lineIdx] = `🚫 [${i + 1}/${localMissing.length}] ${fullDisp}  已取消，残留文件已删除`; updateWidget(); break; }
                                     if (pres.error || pres.status === "error") { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${fullDisp}: ${pres.error || "失败"}`; updateWidget(); break; }
-                                    if (pres.status === "done") { okCount++; logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]`; updateWidget(); appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath }); break; }
+                                    if (pres.status === "done") { okCount++; logLines[lineIdx] = `✓ [${i + 1}/${localMissing.length}] ${fullDisp}  ${fmtSize(pres.downloaded)}  [${pres.folder || folder}]${pres.mirror_note ? "  🔄 " + pres.mirror_note : ""}`; updateWidget(); appendToManifest({ name: f.name, direct_url: f.direct_url, folder: pres.folder || folder, size: pres.downloaded || f.size || 0, subpath }); break; }
                                     if (pres.status === "starting" || pres.status === "connecting") { logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${fullDisp}  连接中...`; updateWidget(); continue; }
                                     const pct = pres.total > 0 ? pres.percent.toFixed(1) : "—";
                                     const dl = fmtSize(pres.downloaded);
                                     const tot = pres.total > 0 ? fmtSize(pres.total) : "未知";
                                     const spd = fmtSize(pres.speed);
-                                    logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${fullDisp}  ${dl}/${tot}  ${pct}%  ${spd}/s`;
+                                    logLines[lineIdx] = `⏳ [${i + 1}/${localMissing.length}] ${fullDisp}  ${dl}/${tot}  ${pct}%  ${spd}/s${pres.mirror_note ? "  🔄 " + pres.mirror_note : ""}`;
                                     updateWidget();
                                 } catch (e2) { logLines[lineIdx] = `❌ [${i + 1}/${localMissing.length}] ${fullDisp}: 轮询失败`; updateWidget(); break; }
                             }
