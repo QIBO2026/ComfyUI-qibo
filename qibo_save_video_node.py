@@ -223,26 +223,16 @@ def _rife_download_ckpt(ckpt_name):
     all_urls = [base + ckpt_name for base in _RIFE_BASE_URLS]
     all_urls += _RIFE_FALLBACK_URLS.get(ckpt_name, [])
     errors = []
-    for url in all_urls:
+    for raw_url in all_urls:
         try:
-            import requests
-            import urllib.parse as _up
-            _p = _up.urlsplit(url)
-            if (_p.hostname or "").lower() == "huggingface.co":
-                url = _up.urlunsplit(_p._replace(netloc="hf-mirror.com"))
+            from qibo_modelscope import _download_direct, _to_hf_mirror
+            url = _to_hf_mirror(raw_url)
             print(f"[QIBO-RIFE] 下载 {ckpt_name} from {url}")
-            r = requests.get(url, stream=True, timeout=30, allow_redirects=True)
-            r.raise_for_status()
-            done = 0
-            with open(dest, "wb") as f:
-                for chunk in r.iter_content(1024 * 1024):
-                    if chunk:
-                        f.write(chunk)
-                        done += len(chunk)
-            print(f"[QIBO-RIFE] 下载完成: {dest} ({done} bytes)")
+            _download_direct(url, dest)
+            print(f"[QIBO-RIFE] 下载完成: {dest} ({os.path.getsize(dest)} bytes)")
             return dest
         except Exception as e:
-            errors.append(f"{url}: {e}")
+            errors.append(f"{raw_url}: {e}")
             if os.path.exists(dest):
                 os.remove(dest)
     raise RuntimeError(f"下载 {ckpt_name} 失败:\n" + "\n".join(errors))
