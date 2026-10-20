@@ -13,6 +13,7 @@ import urllib.parse
 import threading
 import time
 import uuid
+import shutil
 
 
 try:
@@ -387,6 +388,73 @@ def _mark_local_exists(files):
                 if ok and lsize and not f.get("size"):
                     f["size"] = lsize
     return files
+
+
+_LOCAL_MODEL_EXTS = {".safetensors", ".ckpt", ".pt", ".pth", ".gguf", ".bin", ".onnx", ".sft"}
+
+
+def _models_base_dir():
+    try:
+        import folder_paths as fp
+        base = getattr(fp, "models_dir", None)
+        if base and os.path.isdir(base):
+            return os.path.realpath(base)
+    except Exception:
+        pass
+    return None
+
+
+def _scan_local_models():
+    base = _models_base_dir()
+    if not base:
+        return []
+    out = []
+    for folder in sorted(os.listdir(base)):
+        fdir = os.path.join(base, folder)
+        if not os.path.isdir(fdir) or folder.startswith("."):
+            continue
+        for root, dirs, files in os.walk(fdir):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for fn in files:
+                if os.path.splitext(fn)[1].lower() not in _LOCAL_MODEL_EXTS:
+                    continue
+                full = os.path.join(root, fn)
+                rel = os.path.relpath(full, fdir).replace("\\", "/")
+                try:
+                    size = os.path.getsize(full)
+                except OSError:
+                    size = 0
+                out.append({"folder": folder, "subpath": os.path.dirname(rel), "name": fn, "size": size})
+    out.sort(key=lambda x: (x["folder"], x["subpath"], x["name"].lower()))
+    return out
+
+
+def _move_one_model(item, dest_dir):
+    folder = (item.get("folder") or "").strip()
+    subpath = (item.get("subpath") or "").strip()
+    filename = (item.get("filename") or "").strip()
+    if not folder or not filename:
+        return {"folder": folder, "filename": filename, "ok": False, "error": "folder/filename 为空"}
+    src_dir = _resolve_dest_dir(folder)
+    if not src_dir:
+        return {"folder": folder, "filename": filename, "ok": False, "error": f"未知模型目录: {folder}"}
+    parts = [p for p in subpath.replace("\\", "/").split("/") if p and p not in (".", "..")]
+    src = os.path.realpath(os.path.join(src_dir, *parts, filename))
+    if not src.startswith(os.path.realpath(src_dir) + os.sep):
+        return {"folder": folder, "filename": filename, "ok": False, "error": "非法路径"}
+    if not os.path.isfile(src):
+        return {"folder": folder, "filename": filename, "ok": False, "error": "文件不存在"}
+    dest = os.path.realpath(os.path.join(dest_dir, *parts, filename))
+    if os.path.normcase(src) == os.path.normcase(dest):
+        return {"folder": folder, "filename": filename, "ok": False, "error": "源与目标相同"}
+    if os.path.exists(dest):
+        return {"folder": folder, "filename": filename, "ok": False, "error": "目标已存在同名文件，未覆盖"}
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.move(src, dest)
+    except Exception as e:
+        return {"folder": folder, "filename": filename, "ok": False, "error": str(e)}
+    return {"folder": folder, "filename": filename, "ok": True, "from": src, "to": dest}
 
 
 def _parse_manifest_text(text, folder_keys):
@@ -1085,6 +1153,42 @@ def register_server_routes():
         except Exception:
             folders = []
         return web.json_response({"folders": folders})
+
+
+    @routes.get("/qibo/modelscope/list_local")
+    async def ms_list_local(request):
+        try:
+            models = await asyncio.to_thread(_scan_local_models)
+        except Exception as e:
+            return web.json_response({"error": str(e), "models": []})
+        return web.json_response({"models": models})
+
+    @routes.post("/qibo/modelscope/move")
+    async def ms_move(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        models = payload.get("models") or []
+        if isinstance(models, dict):
+            models = [models]
+        dest_folder = (payload.get("dest_folder") or "").strip()
+        if not isinstance(models, list) or len(models) == 0:
+            return web.json_response({"error": "models 为空或格式错误", "results": []})
+        if not dest_folder:
+            return web.json_response({"error": "dest_folder 为空", "results": []})
+        base = _models_base_dir()
+        if not base:
+            return web.json_response({"error": "未找到 models 目录", "results": []})
+        dest_dir = os.path.realpath(os.path.join(base, dest_folder))
+        if not dest_dir.startswith(base + os.sep) or not os.path.isdir(dest_dir):
+            return web.json_response({"error": f"非法目标目录: {dest_folder}", "results": []})
+
+        results = []
+        for item in models:
+            results.append(await asyncio.to_thread(_move_one_model, item, dest_dir))
+        ok_count = sum(1 for r in results if r.get("ok"))
+        return web.json_response({"results": results, "ok_count": ok_count})
 
     @routes.post("/qibo/fetch_text")
     async def qibo_fetch_text(request):
