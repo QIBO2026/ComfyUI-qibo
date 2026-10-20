@@ -949,9 +949,14 @@ def register_server_routes():
 
     @routes.get("/qibo/model_folders")
     async def qibo_model_folders(request):
+        folders = []
         try:
             import folder_paths as fp
-            folders = sorted(k for k in fp.folder_names_and_paths.keys() if k not in ("configs", "custom_nodes"))
+            base = getattr(fp, "models_dir", None)
+            if base and os.path.isdir(base):
+                for name in sorted(os.listdir(base)):
+                    if os.path.isdir(os.path.join(base, name)) and not name.startswith("."):
+                        folders.append(name)
         except Exception:
             folders = []
         return web.json_response({"folders": folders})

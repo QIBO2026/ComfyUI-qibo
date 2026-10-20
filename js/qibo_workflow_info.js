@@ -635,12 +635,7 @@ app.registerExtension({
                                 } catch (err) { }
                             }
                         };
-                                menu.appendChild(opt);
-                            }
-                            document.body.appendChild(menu);
-                            const closeMenu = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("mousedown", closeMenu); } };
-                            setTimeout(() => document.addEventListener("mousedown", closeMenu), 0);
-                        };
+
                         folderContent.appendChild(itemEl);
                     }
                     folderEl.appendChild(folderContent);
