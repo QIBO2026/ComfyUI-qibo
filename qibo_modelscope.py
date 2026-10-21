@@ -131,6 +131,7 @@ AIFASTHUB_HOST = "aifasthub.com"
 _SLOW_SWITCH_THRESHOLD = 1024 * 1024
 _SLOW_SWITCH_MIN_BYTES = 4 * 1024 * 1024
 _SLOW_SWITCH_MIN_SECONDS = 5.0
+_SLOW_SWITCH_WINDOW = 3.0
 
 
 def _is_hf_url(url):
@@ -182,6 +183,22 @@ def _stream_get(url, timeout=1200):
     return r
 
 
+def _slow_switch_needed(url, total, done, start_time, now, recent):
+    """慢速切换判定：整体平均速度与最近 3 秒滑动窗口速度均低于阈值才切换。
+    近期速度已回升（当前源下载已变快）则不切换。recent 为 [(时刻, 字节数)]。"""
+    if not (_is_hf_url(url) and total > _SLOW_SWITCH_MIN_BYTES):
+        return False
+    elapsed = now - start_time
+    if elapsed < _SLOW_SWITCH_MIN_SECONDS:
+        return False
+    if done / elapsed >= _SLOW_SWITCH_THRESHOLD:
+        return False
+    window_bytes = sum(sz for _, sz in recent)
+    window_span = min(elapsed, _SLOW_SWITCH_WINDOW)
+    window_speed = window_bytes / max(window_span, 0.5)
+    return window_speed < _SLOW_SWITCH_THRESHOLD
+
+
 def _download_direct(url, dest_path, timeout=1200):
     return _download_direct_inner(url, dest_path, timeout, allow_switch=True)
 
@@ -191,17 +208,21 @@ def _download_direct_inner(url, dest_path, timeout, allow_switch):
     total = int(r.headers.get("Content-Length", 0))
     done = 0
     start_time = time.time()
+    recent = []
     with open(dest_path, "wb") as f:
         for chunk in r.iter_content(1024 * 1024):
             if chunk:
                 f.write(chunk)
                 done += len(chunk)
                 now = time.time()
-                if (allow_switch and _is_hf_url(url) and total > _SLOW_SWITCH_MIN_BYTES
-                        and now - start_time >= _SLOW_SWITCH_MIN_SECONDS
-                        and done / (now - start_time) < _SLOW_SWITCH_THRESHOLD):
-                    r.close()
-                    return _download_direct_inner(_to_aifasthub(url), dest_path, timeout, allow_switch=False)
+                if allow_switch:
+                    recent.append((now, len(chunk)))
+                    cutoff = now - _SLOW_SWITCH_WINDOW
+                    while recent and recent[0][0] < cutoff:
+                        recent.pop(0)
+                    if _slow_switch_needed(url, total, done, start_time, now, recent):
+                        r.close()
+                        return _download_direct_inner(_to_aifasthub(url), dest_path, timeout, allow_switch=False)
     return {"ok": True, "path": dest_path, "size": os.path.getsize(dest_path), "downloaded": done}
 
 
@@ -245,6 +266,7 @@ def _download_with_progress_inner(url, dest_path, task_id, timeout, allow_switch
             t["status"] = "downloading"
     cancelled = False
     switched = False
+    recent = []
     with open(dest_path, "wb") as f:
         for chunk in r.iter_content(1024 * 1024):
             if chunk:
@@ -261,14 +283,17 @@ def _download_with_progress_inner(url, dest_path, task_id, timeout, allow_switch
                         t["status"] = "downloading"
                         rc = t["recent_chunks"]
                         rc.append((now, len(chunk)))
-                        cutoff = now - 3
+                        cutoff = now - _SLOW_SWITCH_WINDOW
                         while rc and rc[0][0] < cutoff:
                             rc.pop(0)
-                if (allow_switch and _is_hf_url(url) and total > _SLOW_SWITCH_MIN_BYTES
-                        and now - start_time >= _SLOW_SWITCH_MIN_SECONDS
-                        and done / (now - start_time) < _SLOW_SWITCH_THRESHOLD):
-                    switched = True
-                    break
+                if allow_switch:
+                    recent.append((now, len(chunk)))
+                    cutoff = now - _SLOW_SWITCH_WINDOW
+                    while recent and recent[0][0] < cutoff:
+                        recent.pop(0)
+                    if _slow_switch_needed(url, total, done, start_time, now, recent):
+                        switched = True
+                        break
     if switched:
         try:
             r.close()
@@ -279,7 +304,7 @@ def _download_with_progress_inner(url, dest_path, task_id, timeout, allow_switch
             if t:
                 t["status"] = "connecting"
                 t["downloaded"] = 0
-                t["mirror_note"] = f"速度低于 {_SLOW_SWITCH_THRESHOLD // 1024 // 1024}MB/s，已切换 {AIFASTHUB_HOST} 镜像重试"
+                t["mirror_note"] = f"速度持续低于 {_SLOW_SWITCH_THRESHOLD // 1024 // 1024}MB/s，已切换 {AIFASTHUB_HOST} 镜像重试"
                 t["recent_chunks"] = []
         return _download_with_progress_inner(_to_aifasthub(url), dest_path, task_id, timeout, allow_switch=False)
     if cancelled:
