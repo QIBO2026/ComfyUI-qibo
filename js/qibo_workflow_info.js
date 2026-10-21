@@ -1997,6 +1997,7 @@ app.registerExtension({
 
                     let okCount = 0;
                     let skipCount = 0;
+                    let skipExistsCount = 0;
                     for (let i = 0; i < models.length; i++) {
                         const m = models[i];
                         const folder = m.folder || "checkpoints";
@@ -2015,10 +2016,17 @@ app.registerExtension({
                             const dres = await fetchJson("/qibo/modelscope/download", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ direct_url: m.direct_url, filename: m.name, folder, subpath: m.subpath || "" }),
+                                body: JSON.stringify({ direct_url: m.direct_url, filename: m.name, folder, subpath: m.subpath || "", size: m.size || 0 }),
                             });
                             if (dres.__error) { logLines[lineIdx] = `❌ [${i + 1}/${models.length}] ${m.name}: ${dres.__error}`; logLines[lineIdx + 1] = ""; updateWidget(); continue; }
                             if (dres.error) { logLines[lineIdx] = `❌ [${i + 1}/${models.length}] ${m.name}: ${dres.error}`; logLines[lineIdx + 1] = ""; updateWidget(); continue; }
+                            if (dres.skipped) {
+                                skipExistsCount++;
+                                logLines[lineIdx] = `✓ [${i + 1}/${models.length}] ${m.name}  ${fmtSize(dres.size || 0)}`;
+                                logLines[lineIdx + 1] = `    → ${dres.folder || folder}  已存在且大小一致，跳过下载`;
+                                updateWidget();
+                                continue;
+                            }
                             if (!dres.task_id) { logLines[lineIdx] = `❌ [${i + 1}/${models.length}] ${m.name}: 未返回 task_id`; logLines[lineIdx + 1] = ""; updateWidget(); continue; }
                             const taskId = dres.task_id;
                             const destPath = dres.dest_path || "";
@@ -2062,7 +2070,7 @@ app.registerExtension({
                             updateWidget();
                         }
                     }
-                    logLines.push("", `✅ 下载完成: ${okCount}/${models.length} 成功${skipCount ? `, ${skipCount} 跳过(无地址)` : ""}`);
+                    logLines.push("", `✅ 下载完成: ${okCount}/${models.length} 成功${skipExistsCount ? `, ${skipExistsCount} 已存在跳过` : ""}${skipCount ? `, ${skipCount} 跳过(无地址)` : ""}`);
                     updateWidget();
                 } catch (e) {
                     logLines.push(``, `❌ 异常: ${e}`);
