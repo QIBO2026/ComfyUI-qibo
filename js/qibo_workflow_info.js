@@ -2097,6 +2097,15 @@ app.registerExtension({
                         body: JSON.stringify({ models }),
                     });
                     if (res.__error) { logLines.push(`❌ ${res.__error}`); updateWidget(); return; }
+                    if (res.error) {
+                        logLines.push(`❌ ${res.error}`);
+                        if (res.traceback) {
+                            const tbLines = res.traceback.split("\n").filter(l => l.trim());
+                            for (const tl of tbLines.slice(-6)) logLines.push(`    ${tl}`);
+                        }
+                        updateWidget();
+                        return;
+                    }
                     logLines.push(`✅ 已打印 ${models.length} 个模型到 ComfyUI 启动终端:`);
                     for (let i = 0; i < models.length; i++) {
                         const m = models[i];

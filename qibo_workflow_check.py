@@ -35,6 +35,18 @@ except ImportError:
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def _safe_print(msg):
+    """print 防御：终端编码非 UTF-8（如 LANG=C 的 ASCII）时中文输出抛 UnicodeEncodeError。"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        try:
+            enc = sys.stdout.encoding or "ascii"
+            print(str(msg).encode(enc, errors="replace").decode(enc, errors="replace"))
+        except Exception:
+            pass
+
+
 def _sh_quote(s):
     return "'" + str(s).replace("'", "'\\''") + "'"
 
@@ -42,8 +54,12 @@ def _sh_quote(s):
 def _generate_download_sh(payload):
     """按清单生成可执行 sh 下载脚本（脚本版"恢复模型下载"）。
     返回 (script_path, 有地址模型数)。"""
-    from qibo_modelscope import _clean_url, _to_hf_mirror, _resolve_dest_dir
-    models = payload.get("models") or []
+    try:
+        from qibo_modelscope import _clean_url, _to_hf_mirror, _resolve_dest_dir
+    except Exception as e:
+        _safe_print(f"[QIBO] 生成下载脚本失败(导入 qibo_modelscope 失败): {e}")
+        return "", 0
+    models = [m for m in (payload.get("models") or []) if isinstance(m, dict)]
     usable = [m for m in models if (m.get("direct_url") or "").strip()]
     n = len(models)
     lines = [
@@ -153,12 +169,20 @@ def _generate_download_sh(payload):
         except Exception:
             pass
     except Exception as e:
-        print(f"[QIBO] 生成下载脚本失败: {e}")
-        sys.stdout.flush()
+        _safe_print(f"[QIBO] 生成下载脚本失败: {e}")
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
         return "", len(usable)
-    print(f"[QIBO] 已生成模型下载脚本: {script_path}（可执行: bash qibo_download_models.sh）")
-    sys.stdout.flush()
+    _safe_print(f"[QIBO] 已生成模型下载脚本: {script_path}（可执行: bash qibo_download_models.sh）")
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
     return script_path, len(usable)
+
+
 _MANAGER_MAP = os.path.normpath(
     os.path.join(_HERE, "..", "ComfyUI-Manager", "extension-node-map.json")
 )
@@ -851,13 +875,22 @@ def register_server_routes():
             payload = await request.json()
         except Exception:
             payload = {}
-        print("\n[QIBO] 模型下载清单 JSON:")
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-        sys.stdout.flush()
-        script_path, script_count = _generate_download_sh(payload)
-        return web.json_response({
-            "status": "ok",
-            "count": len(payload.get("models") or []),
-            "script_path": script_path,
-            "script_count": script_count,
-        })
+        try:
+            _safe_print("\n[QIBO] 模型下载清单 JSON:")
+            _safe_print(json.dumps(payload, ensure_ascii=False, indent=2))
+            try:
+                sys.stdout.flush()
+            except Exception:
+                pass
+            script_path, script_count = _generate_download_sh(payload)
+            return web.json_response({
+                "status": "ok",
+                "count": len(payload.get("models") or []),
+                "script_path": script_path,
+                "script_count": script_count,
+            })
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            _safe_print(f"[QIBO] print_manifest 异常:\n{tb}")
+            return web.json_response({"error": f"打印清单失败: {e}", "traceback": tb[-3000:]})
