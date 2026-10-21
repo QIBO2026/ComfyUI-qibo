@@ -33,6 +33,132 @@ except ImportError:
     web = None
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _sh_quote(s):
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+def _generate_download_sh(payload):
+    """按清单生成可执行 sh 下载脚本（脚本版"恢复模型下载"）。
+    返回 (script_path, 有地址模型数)。"""
+    from qibo_modelscope import _clean_url, _to_hf_mirror, _resolve_dest_dir
+    models = payload.get("models") or []
+    usable = [m for m in models if (m.get("direct_url") or "").strip()]
+    n = len(models)
+    lines = [
+        "#!/usr/bin/env bash",
+        "# QIBO 模型清单下载脚本（由「终端打印清单」自动生成）",
+        f"# 生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"# 模型总数: {n}（有地址 {len(usable)} / 无地址 {n - len(usable)}）",
+        "# 用法: bash qibo_download_models.sh",
+        "# 说明: 已存在且大小一致的文件自动跳过；下载失败可重新运行脚本断点续传",
+        "",
+        "OK=0; SKIP=0; FAIL=0; TOTAL=0",
+        "",
+        "dl() {",
+        '  if command -v wget >/dev/null 2>&1; then',
+        '    wget -c -q --show-progress -O "$2" "$1"',
+        "  else",
+        '    curl -fL -C - -o "$2" "$1"',
+        "  fi",
+        "}",
+        "",
+        "size_ok() {",
+        '  [ "$2" -gt 0 ] 2>/dev/null || return 1',
+        "  local s",
+        '  s=$(stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || echo -1)',
+        '  [ "$s" = "$2" ]',
+        "}",
+        "",
+    ]
+    for i, m in enumerate(models, 1):
+        url = (m.get("direct_url") or "").strip()
+        name = m.get("name") or os.path.basename(m.get("model") or "") or ""
+        folder = m.get("folder") or "checkpoints"
+        subpath = (m.get("subpath") or "").strip()
+        rename_to = (m.get("rename_to") or "").strip()
+        try:
+            size = int(m.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if not url or not name:
+            lines.append(f"# [{i}/{n}] {name or '(未命名)'}  [无下载地址，跳过]")
+            lines.append("")
+            continue
+        url = _to_hf_mirror(_clean_url(url))
+        dest_dir = _resolve_dest_dir(folder)
+        if not dest_dir:
+            dest_dir = os.path.normpath(os.path.join(_HERE, "..", "..", "models", folder))
+        sub_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
+        final_name = rename_to if rename_to and rename_to != name else name
+        dest = os.path.join(dest_dir, *sub_parts, final_name)
+        download_dest = os.path.join(dest_dir, *sub_parts, name)
+        rel_hint = folder + ("/" + subpath if subpath else "")
+        lines.append(f"# [{i}/{n}] {final_name}  ->  {rel_hint}")
+        lines.append("TOTAL=$((TOTAL+1))")
+        lines.append(f"DEST={_sh_quote(dest)}")
+        lines.append(f"URL={_sh_quote(url)}")
+        lines.append(f"SIZE={size}")
+        lines.append('if size_ok "$DEST" "$SIZE"; then')
+        lines.append(f"  echo {_sh_quote(f'  [{i}/{n}] SKIP 已存在且大小一致: {final_name}')}")
+        lines.append("  SKIP=$((SKIP+1))")
+        lines.append("else")
+        lines.append('  mkdir -p "$(dirname "$DEST")"')
+        if download_dest != dest:
+            lines.append(f"  echo {_sh_quote(f'  [{i}/{n}] 下载中: {name} -> {final_name} ...')}")
+            lines.append(f'  if dl "$URL" {_sh_quote(download_dest)}; then')
+            lines.append(f"    mv -f {_sh_quote(download_dest)} \"$DEST\"")
+            lines.append("    DL_OK=1")
+            lines.append("  else")
+            lines.append("    DL_OK=0")
+            lines.append("  fi")
+        else:
+            lines.append(f"  echo {_sh_quote(f'  [{i}/{n}] 下载中: {final_name} ...')}")
+            lines.append('  if dl "$URL" "$DEST"; then')
+            lines.append("    DL_OK=1")
+            lines.append("  else")
+            lines.append("    DL_OK=0")
+            lines.append("  fi")
+        lines.append('  if [ "$DL_OK" = "1" ]; then')
+        lines.append('    if size_ok "$DEST" "$SIZE"; then')
+        lines.append(f"      echo {_sh_quote(f'  [{i}/{n}] OK: {final_name}')}")
+        lines.append("      OK=$((OK+1))")
+        lines.append("    else")
+        lines.append(f"      echo {_sh_quote(f'  [{i}/{n}] WARN 大小与清单不一致(期望 {size}): {final_name}')}")
+        lines.append("      FAIL=$((FAIL+1))")
+        lines.append("    fi")
+        lines.append("  else")
+        lines.append(f"    echo {_sh_quote(f'  [{i}/{n}] FAIL 下载失败(可重跑本脚本续传): {final_name}')}")
+        lines.append("    FAIL=$((FAIL+1))")
+        lines.append("  fi")
+        lines.append("fi")
+        lines.append("")
+    lines.extend([
+        'echo ""',
+        'echo "完成: 成功 $OK / 跳过 $SKIP / 失败 $FAIL / 共 $TOTAL"',
+        'if [ "$FAIL" -eq 0 ]; then',
+        '  echo "全部模型就绪，重启 ComfyUI 后即可使用"',
+        "else",
+        '  echo "存在失败项，重新运行本脚本可断点续传重试"',
+        "  exit 1",
+        "fi",
+    ])
+    script_path = os.path.join(_HERE, "qibo_download_models.sh")
+    try:
+        with open(script_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines) + "\n")
+        try:
+            os.chmod(script_path, 0o755)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[QIBO] 生成下载脚本失败: {e}")
+        sys.stdout.flush()
+        return "", len(usable)
+    print(f"[QIBO] 已生成模型下载脚本: {script_path}（可执行: bash qibo_download_models.sh）")
+    sys.stdout.flush()
+    return script_path, len(usable)
 _MANAGER_MAP = os.path.normpath(
     os.path.join(_HERE, "..", "ComfyUI-Manager", "extension-node-map.json")
 )
@@ -728,4 +854,10 @@ def register_server_routes():
         print("\n[QIBO] 模型下载清单 JSON:")
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         sys.stdout.flush()
-        return web.json_response({"status": "ok", "count": len(payload.get("models") or [])})
+        script_path, script_count = _generate_download_sh(payload)
+        return web.json_response({
+            "status": "ok",
+            "count": len(payload.get("models") or []),
+            "script_path": script_path,
+            "script_count": script_count,
+        })

@@ -2103,6 +2103,12 @@ app.registerExtension({
                         logLines.push(`  [${i + 1}] ${m.name}  [${m.folder || "?"}]`);
                         logLines.push(`      ${m.direct_url || "(无地址)"}`);
                     }
+                    if (res.script_path) {
+                        logLines.push("");
+                        logLines.push(`📜 已生成下载脚本: ${res.script_path}`);
+                        logLines.push(`   含 ${res.script_count || 0} 个可下载模型（已存在且大小一致的自动跳过）`);
+                        logLines.push(`   执行方法: bash qibo_download_models.sh`);
+                    }
                     logLines.push("\n请查看 ComfyUI 启动终端（控制台）输出");
                     updateWidget();
                 } catch (e) {

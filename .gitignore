@@ -35,3 +35,6 @@ push_gitee.sh
 gitee_push_helper.py
 # 仓库上传 MD5 缓存（本地运行产物，不发布）
 qibo_ref_md5_cache.json
+# 终端打印清单生成的下载脚本（本地运行产物，不发布）
+qibo_download_models.sh
+qibo_model_manifest.json
