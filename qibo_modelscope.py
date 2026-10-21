@@ -132,6 +132,9 @@ _SLOW_SWITCH_THRESHOLD = 1024 * 1024
 _SLOW_SWITCH_MIN_BYTES = 4 * 1024 * 1024
 _SLOW_SWITCH_MIN_SECONDS = 5.0
 _SLOW_SWITCH_WINDOW = 3.0
+_PROBE_MAX_BYTES = 3 * 1024 * 1024
+_PROBE_TIMEOUT = 5.0
+_PROBE_RATIO = 1.3
 
 
 def _is_hf_url(url):
@@ -199,6 +202,69 @@ def _slow_switch_needed(url, total, done, start_time, now, recent):
     return window_speed < _SLOW_SWITCH_THRESHOLD
 
 
+def _probe_speed(url, max_bytes=None):
+    """限时 Range 测速（镜像选源用）：最多读 max_bytes 字节或耗时 _PROBE_TIMEOUT 秒，返回 bytes/s；失败返回 0。"""
+    if max_bytes is None:
+        max_bytes = _PROBE_MAX_BYTES
+    try:
+        headers = _build_download_headers(url)
+        headers["Range"] = f"bytes=0-{max_bytes - 1}"
+        r = requests.get(url, headers=headers, stream=True, timeout=(5, 15), allow_redirects=True)
+        try:
+            if not r.ok or "text/html" in r.headers.get("Content-Type", ""):
+                return 0.0
+            got = 0
+            t0 = time.time()
+            for chunk in r.iter_content(256 * 1024):
+                if not chunk:
+                    continue
+                got += len(chunk)
+                if got >= max_bytes or time.time() - t0 >= _PROBE_TIMEOUT:
+                    break
+            elapsed = time.time() - t0
+            return got / elapsed if elapsed > 0 else 0.0
+        finally:
+            try:
+                r.close()
+            except Exception:
+                pass
+    except Exception:
+        return 0.0
+
+
+def _pick_fast_hf_url(url, total=0):
+    """hf-mirror.com 与 aifasthub.com 并行限时测速，选快源下载。
+    aifasthub 需明显更快（1.3 倍以上）才选用；两源都失败保持默认镜像源。
+    返回 (选中URL, 说明文本)。"""
+    base = _to_hf_mirror(url)
+    alt = _to_aifasthub(base)
+    if total > 0:
+        max_bytes = max(512 * 1024, min(_PROBE_MAX_BYTES, total // 4))
+    else:
+        max_bytes = _PROBE_MAX_BYTES
+    speeds = [0.0, 0.0]
+
+    def _probe(i, u):
+        speeds[i] = _probe_speed(u, max_bytes)
+
+    threads = [
+        threading.Thread(target=_probe, args=(0, base), daemon=True),
+        threading.Thread(target=_probe, args=(1, alt), daemon=True),
+    ]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(_PROBE_TIMEOUT + 12)
+
+    s_base, s_alt = speeds
+    h_base = urllib.parse.urlsplit(base).hostname
+    h_alt = urllib.parse.urlsplit(alt).hostname
+    note = f"镜像测速: {h_base} {s_base / 1048576:.1f}MB/s / {h_alt} {s_alt / 1048576:.1f}MB/s"
+    if s_alt > 0 and (s_base <= 0 or s_alt > s_base * _PROBE_RATIO):
+        return alt, note + f"，选用 {h_alt}"
+    return base, note + f"，选用 {h_base}"
+
+
 def _download_direct(url, dest_path, timeout=1200):
     return _download_direct_inner(url, dest_path, timeout, allow_switch=True)
 
@@ -206,6 +272,24 @@ def _download_direct(url, dest_path, timeout=1200):
 def _download_direct_inner(url, dest_path, timeout, allow_switch):
     r = _stream_get(url, timeout)
     total = int(r.headers.get("Content-Length", 0))
+    orig = url
+    if allow_switch and _is_hf_url(url) and total > _SLOW_SWITCH_MIN_BYTES:
+        try:
+            r.close()
+        except Exception:
+            pass
+        url, probe_note = _pick_fast_hf_url(url, total)
+        if probe_note:
+            try:
+                print(f"[QIBO] {probe_note}")
+            except Exception:
+                pass
+        try:
+            r = _stream_get(url, timeout)
+        except Exception:
+            url = _to_hf_mirror(orig)
+            r = _stream_get(url, timeout)
+        total = int(r.headers.get("Content-Length", 0))
     done = 0
     start_time = time.time()
     recent = []
@@ -256,6 +340,28 @@ def _download_with_progress_inner(url, dest_path, task_id, timeout, allow_switch
                     t["error"] = str(e)
             return
     total = int(r.headers.get("Content-Length", 0))
+    orig = url
+    if allow_switch and _is_hf_url(url) and total > _SLOW_SWITCH_MIN_BYTES:
+        try:
+            r.close()
+        except Exception:
+            pass
+        with _task_lock:
+            t = _download_tasks.get(task_id)
+            if t:
+                t["status"] = "connecting"
+                t["mirror_note"] = "正在测速选择最快镜像源..."
+        url, probe_note = _pick_fast_hf_url(url, total)
+        try:
+            r = _stream_get(url, timeout)
+        except Exception:
+            url = _to_hf_mirror(orig)
+            r = _stream_get(url, timeout)
+        total = int(r.headers.get("Content-Length", 0))
+        with _task_lock:
+            t = _download_tasks.get(task_id)
+            if t:
+                t["mirror_note"] = probe_note
     done = 0
     start_time = time.time()
     with _task_lock:
