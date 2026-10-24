@@ -14,7 +14,7 @@ const THEME = {
 const PAD = 12;
 const ROW_H = 34;
 const ROW_GAP = 6;
-const TOP_GAP = 10;
+const TOP_GAP = 2;
 const SWITCH_W = 52;
 const SWITCH_H = 28;
 const KNOB_R = 12;
@@ -109,7 +109,7 @@ function rowTop() {
 
 function layoutRows(node) {
     const rows = node.__qiboRows || [];
-    const h = rowTop() + rows.length * (ROW_H + ROW_GAP) + TOP_GAP;
+    const h = rowTop() + rows.length * (ROW_H + ROW_GAP) + 6;
     const w = Math.max((node.size && node.size[0]) || 0, MIN_W);
     if (!node.size || Math.abs(node.size[0] - w) > 0.5 || Math.abs(node.size[1] - h) > 0.5) {
         try { node.setSize([w, h]); } catch (e) {}
