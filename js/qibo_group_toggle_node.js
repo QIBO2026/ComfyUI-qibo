@@ -15,12 +15,13 @@ const PAD = 12;
 const ROW_H = 34;
 const ROW_GAP = 6;
 const TOP_GAP = 10;
-const NAME_MAX = 10;
 const SWITCH_W = 52;
 const SWITCH_H = 28;
 const KNOB_R = 12;
 const SCAN_MS = 300;
 const MIN_W = 320;
+const NAME_LEFT = PAD + 12;
+const NAME_RIGHT_GAP = SWITCH_W + 24;
 
 function modeAlways() {
     return (typeof LiteGraph !== "undefined" && LiteGraph.ALWAYS != null) ? LiteGraph.ALWAYS : 0;
@@ -59,24 +60,31 @@ function nodesInGroup(group) {
 }
 
 function groupEnabled(group) {
-    const ns = nodesInGroup(group);
-    if (!ns.length) return true;
-    return ns.every((n) => n.mode === modeAlways());
+    return group.mode !== modeIgnore();
+}
+
+function applyGroupModesToNodes() {
+    const map = new Map();
+    for (const g of allGroups()) {
+        const off = !groupEnabled(g);
+        for (const n of nodesInGroup(g)) {
+            if (n.type === NODE_TYPE) continue;
+            if (!map.has(n)) map.set(n, []);
+            map.get(n).push(off);
+        }
+    }
+    for (const [n, offs] of map) {
+        const anyOff = offs.some(Boolean);
+        if (n.mode !== n.__qiboLastSet) n.__qiboOrigMode = n.mode;
+        const target = anyOff ? modeIgnore() : (n.__qiboOrigMode != null ? n.__qiboOrigMode : modeAlways());
+        n.__qiboLastSet = target;
+        n.mode = target;
+    }
 }
 
 function setGroupEnabled(group, enabled) {
-    const target = enabled ? modeAlways() : modeIgnore();
-    for (const n of nodesInGroup(group)) {
-        if (n.type === NODE_TYPE) continue;
-        try { n.mode = target; } catch (e) {}
-    }
-    try { group.mode = target; } catch (e) {}
-}
-
-function clipName(t) {
-    const s = String(t == null ? "" : t).trim() || "未命名分组";
-    const chars = [...s];
-    return chars.length > NAME_MAX ? chars.slice(0, NAME_MAX).join("") + "…" : s;
+    group.mode = enabled ? modeAlways() : modeIgnore();
+    applyGroupModesToNodes();
 }
 
 function titleHeight() {
@@ -98,16 +106,28 @@ function layoutRows(node) {
 
 function refreshRows(node) {
     const groups = allGroups();
-    node.__qiboRows = groups.map((g) => {
-        const cnt = nodesInGroup(g).length;
-        const name = cnt ? clipName(g.title) : clipName(g.title) + "（空组）";
-        return { group: g, name, enabled: groupEnabled(g) };
-    });
+    node.__qiboRows = groups.map((g) => ({
+        group: g,
+        title: String(g.title == null ? "" : g.title).trim() || "未命名分组",
+        count: nodesInGroup(g).length,
+        enabled: groupEnabled(g),
+    }));
     layoutRows(node);
 }
 
 function scanSignature() {
     return allGroups().map((g) => `${g.title || ""}:${groupEnabled(g) ? 1 : 0}:${nodesInGroup(g).length}`).join("|");
+}
+
+function fitName(ctx, text, maxW) {
+    if (ctx.measureText(text).width <= maxW) return text;
+    const chars = [...text];
+    let s = "";
+    for (const ch of chars) {
+        if (ctx.measureText(s + ch + "…").width > maxW) return s + "…";
+        s += ch;
+    }
+    return s;
 }
 
 function rowAt(node, localPos) {
@@ -199,7 +219,7 @@ app.registerExtension({
                 const rowY = top + i * (ROW_H + ROW_GAP);
                 const switchX = this.size[0] - SWITCH_W - PAD - 4;
                 const switchY = rowY + (ROW_H - SWITCH_H) / 2;
-                const isOn = row.enabled;
+                const isOn = row.enabled = groupEnabled(row.group);
 
                 rr(ctx, PAD, rowY, rowW, ROW_H, 8);
                 ctx.fillStyle = THEME.itemBg;
@@ -208,15 +228,26 @@ app.registerExtension({
                 ctx.lineWidth = 1;
                 ctx.stroke();
 
-                ctx.fillStyle = isOn ? THEME.accentColor : THEME.accentDim;
                 ctx.font = "bold 14px 'Segoe UI', Arial, sans-serif";
+                const full = row.count ? row.title : row.title + "（空组）";
+                const maxW = switchX - NAME_RIGHT_GAP - NAME_LEFT;
+                const shown = fitName(ctx, full, maxW);
+                ctx.fillStyle = isOn ? THEME.accentColor : THEME.accentDim;
                 ctx.textAlign = "left";
                 ctx.textBaseline = "middle";
                 ctx.shadowColor = "rgba(0,0,0,0.5)";
                 ctx.shadowBlur = 2;
                 ctx.shadowOffsetY = 1;
-                ctx.fillText(row.name, PAD + 12, rowY + ROW_H / 2 + 1);
+                ctx.fillText(shown, NAME_LEFT, rowY + ROW_H / 2 + 1);
                 ctx.shadowColor = "transparent";
+
+                ctx.font = "11px 'Segoe UI', Arial, sans-serif";
+                const cntTxt = `${row.count}节点`;
+                const cntW = ctx.measureText(cntTxt).width;
+                if (switchX - NAME_RIGHT_GAP - (NAME_LEFT + ctx.measureText(shown).width) > cntW + 14) {
+                    ctx.fillStyle = "rgba(255,255,255,0.28)";
+                    ctx.fillText(cntTxt, switchX - NAME_RIGHT_GAP - cntW, rowY + ROW_H / 2 + 1);
+                }
 
                 rr(ctx, switchX, switchY, SWITCH_W, SWITCH_H, SWITCH_H / 2);
                 if (isOn) {
@@ -271,9 +302,8 @@ app.registerExtension({
                 const idx = rowAt(this, localPos);
                 if (idx >= 0) {
                     const row = this.__qiboRows[idx];
-                    const next = !row.enabled;
-                    setGroupEnabled(row.group, next);
-                    row.enabled = next;
+                    setGroupEnabled(row.group, !groupEnabled(row.group));
+                    row.enabled = groupEnabled(row.group);
                     try { app.graph.setDirtyCanvas(true, true); } catch (e2) {}
                     return true;
                 }
