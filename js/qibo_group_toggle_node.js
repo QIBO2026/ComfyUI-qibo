@@ -7,7 +7,7 @@ function modeAlways() {
 }
 
 function modeIgnore() {
-    return (typeof LiteGraph !== "undefined" && LiteGraph.NEVER != null) ? LiteGraph.NEVER : 2;
+    return (typeof LiteGraph !== "undefined" && LiteGraph.BYPASS != null) ? LiteGraph.BYPASS : 4;
 }
 
 function allGroups() {
