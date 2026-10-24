@@ -103,13 +103,15 @@ function titleHeight() {
     return (typeof LiteGraph !== "undefined" && LiteGraph.NODE_TITLE_HEIGHT) || 30;
 }
 
-function rowTop() {
+function rowTop(node) {
+    const a = node && node.__qiboAnchor;
+    if (a && typeof a.last_y === "number" && a.last_y > 0) return a.last_y;
     return titleHeight() + TOP_GAP;
 }
 
 function layoutRows(node) {
     const rows = node.__qiboRows || [];
-    const h = rowTop() + rows.length * (ROW_H + ROW_GAP) + 6;
+    const h = rowTop(node) + rows.length * (ROW_H + ROW_GAP) + 6;
     const w = Math.max((node.size && node.size[0]) || 0, MIN_W);
     if (!node.size || Math.abs(node.size[0] - w) > 0.5 || Math.abs(node.size[1] - h) > 0.5) {
         try { node.setSize([w, h]); } catch (e) {}
@@ -145,7 +147,7 @@ function fitName(ctx, text, maxW) {
 function rowAt(node, localPos) {
     const rows = node.__qiboRows || [];
     if (!rows.length) return -1;
-    const top = rowTop();
+    const top = rowTop(node);
     if (localPos[1] < top) return -1;
     const idx = Math.floor((localPos[1] - top) / (ROW_H + ROW_GAP));
     if (idx < 0 || idx >= rows.length) return -1;
@@ -187,6 +189,13 @@ app.registerExtension({
                 this.__qiboRows = [];
                 this.__qiboSig = null;
                 this.__qiboLastScan = 0;
+                try {
+                    const anchor = this.addWidget("toggle", "_qibo_anchor", false, () => {});
+                    anchor.hidden = true;
+                    anchor.options = anchor.options || {};
+                    anchor.options.serialize = false;
+                    this.__qiboAnchor = anchor;
+                } catch (e2) {}
                 refreshRows(this);
             } catch (e) {
                 console.warn("[QIBO.GroupToggle] 初始化失败:", e);
@@ -211,7 +220,7 @@ app.registerExtension({
             }
 
             const rows = this.__qiboRows || [];
-            const top = rowTop();
+            const top = rowTop(this);
             const rowW = this.size[0] - PAD * 2;
 
             ctx.imageSmoothingEnabled = true;
