@@ -59,8 +59,16 @@ function nodesInGroup(group) {
     }
 }
 
+function isIgnoredMode(m) {
+    return m === modeIgnore() || m === 2;
+}
+
 function groupEnabled(group) {
-    return group.mode !== modeIgnore();
+    if (isIgnoredMode(group.mode)) return false;
+    if (group.mode === modeAlways()) return true;
+    const ns = nodesInGroup(group).filter((n) => n.type !== NODE_TYPE);
+    if (!ns.length) return true;
+    return ns.some((n) => n.mode === modeAlways());
 }
 
 function applyGroupModesToNodes() {
@@ -75,8 +83,12 @@ function applyGroupModesToNodes() {
     }
     for (const [n, offs] of map) {
         const anyOff = offs.some(Boolean);
-        if (n.mode !== n.__qiboLastSet) n.__qiboOrigMode = n.mode;
-        const target = anyOff ? modeIgnore() : (n.__qiboOrigMode != null ? n.__qiboOrigMode : modeAlways());
+        if (!isIgnoredMode(n.mode) && n.mode !== n.__qiboLastSet) {
+            n.__qiboOrigMode = n.mode;
+        }
+        const orig = (!isIgnoredMode(n.__qiboOrigMode) && n.__qiboOrigMode != null)
+            ? n.__qiboOrigMode : modeAlways();
+        const target = anyOff ? modeIgnore() : orig;
         n.__qiboLastSet = target;
         n.mode = target;
     }
