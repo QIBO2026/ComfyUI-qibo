@@ -17,6 +17,7 @@
   "image_models": [
     "Qwen/Qwen-Image-2.1",
     "krea/Krea-2-Turbo",
+	
     "Qwen/Qwen-Image-2.1-Turbo",
     "Qwen/Qwen-Image",
     "MusePublic/Qwen-image",
@@ -27,9 +28,13 @@
     "MAILAND/majicflus_v1",
     "MoYouuu/MYHuman-QWen",
     "Tongyi-MAI/Z-Image-Turbo",
+	 
     "Q491791643/Krea-2-Turbo_Style_RainyImmortalCourtyard_3DGuoMan_Mugi_v1.0",
     "taeny1314/Krea-2-Turbo-LiuLi",
     "yan303145427/krea2-Cc-FQWZ-ArtStyle",
+	"yan303145427/krea2-Cc-TM-GreatFigure",
+	"yan303145427/krea2-Cc-FY-portrait",
+	"yan303145427/krea2-Cc-Ins-portrait",
     "yan303145427/krea2-Cc-MJ-CinematicSoftLight"
   ],
   "image_edit_models": [
@@ -44,6 +49,7 @@
   "text_models": [
     "Qwen/Qwen3.8-Flash-Next",
 	"Qwen/Qwen3.8-27B",
+	"deepseek-ai/DeepSeek-V4.1-Flash-1017",
     "deepseek-ai/DeepSeek-V4.1-Flash",
     "deepseek-ai/DeepSeek-V3.1",
     "deepseek-ai/DeepSeek-R1-0528",
