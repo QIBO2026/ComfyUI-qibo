@@ -1,0 +1,209 @@
+# Portions outside the derived utility-node section:
+# Copyright (C) 2026 wuwukasi (wuwukaka)
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# The utility nodes marked below are derived from
+# grmchn/ComfyUI-ProportionChanger as disclosed in README.md.
+
+"""
+BodyRatioMapper nodes - Main entry point
+Backward compatibility maintained for existing workflows
+"""
+
+import logging
+import json
+
+log = logging.getLogger(__name__)
+
+# Import all nodes from our organized structure
+from .core import (
+    BodyRatioMapperProportionTransfer,
+    BodyRatioMapperSDPoseRender,
+    BodyRatioMapperSDPoseBoneScale,
+    BodyRatioMapperSDPoseTranslate,
+    BodyRatioMapperSDPoseInterpolate,
+)
+
+
+# ---------------------------------------------------------------------------
+# Derived utility-node section.
+#
+# The following two utility nodes correspond to the README.md acknowledgement:
+# "pose_keypoint input" and "pose_keypoint preview" are derived from
+# grmchn/ComfyUI-ProportionChanger. No project-owner copyright is asserted here
+# for the original upstream portions.
+# ---------------------------------------------------------------------------
+
+class PoseJSONToPoseKeypoint:
+    """
+    Convert JSON string to POSE_KEYPOINT format for testing purposes
+    """
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "pose_json": ("STRING", {"multiline": True, "tooltip": "JSON string containing pose data"})
+            }
+        }
+    
+    RETURN_TYPES = ("POSE_KEYPOINT",)
+    RETURN_NAMES = ("pose_keypoint",)
+    FUNCTION = "convert"
+    CATEGORY = "BodyRatioMapper"
+    
+    def convert(self, pose_json):
+        """
+        Convert JSON string to POSE_KEYPOINT format
+        """
+        if not pose_json or pose_json.strip() == "":
+            # Return empty pose keypoint structure
+            empty_person = {
+                "pose_keypoints_2d": [0.0] * 75,
+                "face_keypoints_2d": [0.0] * 210,
+                "hand_left_keypoints_2d": [0.0] * 63,
+                "hand_right_keypoints_2d": [0.0] * 63
+            }
+            return ([{"people": [empty_person], "canvas_width": 512, "canvas_height": 768}],)
+        
+        try:
+            # Parse JSON string
+            parsed_data = json.loads(pose_json)
+            
+            # Validate basic structure
+            if isinstance(parsed_data, dict):
+                # Single frame format, wrap in list
+                parsed_data = [parsed_data]
+            elif not isinstance(parsed_data, list):
+                raise ValueError("Invalid pose data format")
+            
+            # Basic validation for each frame
+            for frame in parsed_data:
+                if not isinstance(frame, dict):
+                    raise ValueError("Each frame must be a dictionary")
+                if "people" not in frame:
+                    frame["people"] = []
+                if "canvas_width" not in frame:
+                    frame["canvas_width"] = 512
+                if "canvas_height" not in frame:
+                    frame["canvas_height"] = 768
+            
+            return (parsed_data,)
+            
+        except json.JSONDecodeError as e:
+            log.error(f"JSON parsing error: {e}")
+            # Return empty structure on error
+            empty_person = {
+                "pose_keypoints_2d": [0.0] * 75,
+                "face_keypoints_2d": [0.0] * 210,
+                "hand_left_keypoints_2d": [0.0] * 63,
+                "hand_right_keypoints_2d": [0.0] * 63
+            }
+            return ([{"people": [empty_person], "canvas_width": 512, "canvas_height": 768}],)
+        except Exception as e:
+            log.error(f"Pose conversion error: {e}")
+            # Return empty structure on error
+            empty_person = {
+                "pose_keypoints_2d": [0.0] * 75,
+                "face_keypoints_2d": [0.0] * 210,
+                "hand_left_keypoints_2d": [0.0] * 63,
+                "hand_right_keypoints_2d": [0.0] * 63
+            }
+            return ([{"people": [empty_person], "canvas_width": 512, "canvas_height": 768}],)
+
+
+class PoseKeypointPreview:
+    """
+    Convert POSE_KEYPOINT data to JSON string for debugging and copying to PoseJSONToPoseKeypoint
+    """
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "pose_keypoint": ("POSE_KEYPOINT", {"tooltip": "POSE_KEYPOINT data to convert to JSON"}),
+                "pretty_format": ("BOOLEAN", {"default": True, "tooltip": "Format JSON with indentation for readability"}),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
+        }
+    
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("string",)
+    FUNCTION = "convert_to_json"
+    OUTPUT_NODE = True
+    CATEGORY = "BodyRatioMapper"
+    
+    def convert_to_json(self, pose_keypoint, pretty_format, unique_id=None, extra_pnginfo=None):
+        """
+        Convert POSE_KEYPOINT data to JSON string that can be copied to PoseJSONToPoseKeypoint
+        """
+        try:
+            if not pose_keypoint or len(pose_keypoint) == 0:
+                text = '{"version": "1.0", "people": []}'
+            else:
+                # Convert to JSON string
+                if pretty_format:
+                    text = json.dumps(pose_keypoint, indent=2, ensure_ascii=False)
+                else:
+                    text = json.dumps(pose_keypoint, ensure_ascii=False)
+            
+            # Update workflow widgets_values to persist data across reloads (like Show Text)
+            if unique_id is not None and extra_pnginfo is not None and len(extra_pnginfo) > 0:
+                workflow = extra_pnginfo["workflow"]
+                node = next(
+                    (x for x in workflow["nodes"] if str(x["id"]) == str(unique_id[0])),
+                    None,
+                )
+                if node:
+                    node["widgets_values"] = [pretty_format, text]
+            
+            return {"ui": {"text": (text,)}, "result": (text,)}
+            
+        except Exception as e:
+            log.error(f"Failed to convert POSE_KEYPOINT to JSON: {e}")
+            text = f'{{"error": "Failed to convert POSE_KEYPOINT to JSON: {str(e)}"}}'
+            
+            # Update workflow even on error
+            if unique_id is not None and extra_pnginfo is not None and len(extra_pnginfo) > 0:
+                workflow = extra_pnginfo["workflow"]
+                node = next(
+                    (x for x in workflow["nodes"] if str(x["id"]) == str(unique_id[0])),
+                    None,
+                )
+                if node:
+                    node["widgets_values"] = [pretty_format, text]
+            
+            return {"ui": {"text": (text,)}, "result": (text,)}
+
+
+# ---------------------------------------------------------------------------
+# End derived utility-node section.
+# ---------------------------------------------------------------------------
+
+NODE_CLASS_MAPPINGS = {
+    # Main nodes
+    "BodyRatioMapperSDPoseRender": BodyRatioMapperSDPoseRender,
+    "BodyRatioMapperProportionTransfer": BodyRatioMapperProportionTransfer,
+    "BodyRatioMapperSDPoseBoneScale": BodyRatioMapperSDPoseBoneScale,
+    "BodyRatioMapperSDPoseTranslate": BodyRatioMapperSDPoseTranslate,
+    "BodyRatioMapperSDPoseInterpolate": BodyRatioMapperSDPoseInterpolate,
+
+    # Utility nodes
+    "PoseJSONToPoseKeypoint": PoseJSONToPoseKeypoint,
+    "PoseKeypointPreview": PoseKeypointPreview,
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    # Main nodes
+    "BodyRatioMapperSDPoseRender": "BodyRatioMapper SDPose Render",
+    "BodyRatioMapperProportionTransfer": "BodyRatioMapper Proportion Transfer",
+    "BodyRatioMapperSDPoseBoneScale": "BodyRatioMapper SDPose Bone Scale",
+    "BodyRatioMapperSDPoseTranslate": "BodyRatioMapper SDPose Translate",
+    "BodyRatioMapperSDPoseInterpolate": "BodyRatioMapper SDPose Interpolate",
+
+    # Utility nodes
+    "PoseJSONToPoseKeypoint": "pose_keypoint input",
+    "PoseKeypointPreview": "pose_keypoint preview",
+}
+

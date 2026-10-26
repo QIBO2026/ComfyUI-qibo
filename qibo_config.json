@@ -17,7 +17,7 @@
   "image_models": [
     "Qwen/Qwen-Image-2.1",
     "krea/Krea-2-Turbo",
-	
+	"openmoss/MOSS-Image-SFT", 
     "Qwen/Qwen-Image-2.1-Turbo",
     "Qwen/Qwen-Image",
     "MusePublic/Qwen-image",
@@ -28,7 +28,7 @@
     "MAILAND/majicflus_v1",
     "MoYouuu/MYHuman-QWen",
     "Tongyi-MAI/Z-Image-Turbo",
-	 
+ 
     "Q491791643/Krea-2-Turbo_Style_RainyImmortalCourtyard_3DGuoMan_Mugi_v1.0",
     "taeny1314/Krea-2-Turbo-LiuLi",
     "yan303145427/krea2-Cc-FQWZ-ArtStyle",
@@ -40,6 +40,7 @@
   "image_edit_models": [
     "Qwen/Qwen-Image-2.1",
     "krea/Krea-2-Turbo",
+    "openmoss/MOSS-Image-SFT", 
     "Qwen/Qwen-Image-Edit",
     "MusePublic/Qwen-Image-Edit",
     "Qwen/Qwen-Image-Edit-2511",

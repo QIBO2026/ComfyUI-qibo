@@ -742,7 +742,13 @@ class ModelScopeImageNode:
                     raise Exception(f"图片下载失败: {img_response.status_code}")
 
                 pil_image = Image.open(BytesIO(img_response.content))
-                if pil_image.mode != 'RGB':
+                if pil_image.mode == 'RGBA':
+                    pass
+                elif pil_image.mode == 'LA':
+                    pil_image = pil_image.convert('RGBA')
+                elif pil_image.mode == 'P' and 'transparency' in pil_image.info:
+                    pil_image = pil_image.convert('RGBA')
+                elif pil_image.mode != 'RGB':
                     pil_image = pil_image.convert('RGB')
                 image_np = np.array(pil_image).astype(np.float32) / 255.0
                 image_tensor = torch.from_numpy(image_np)[None,]
@@ -983,7 +989,13 @@ class ModelScopeImageEditNode:
                     raise Exception(f"图片下载失败: {img_response.status_code}")
 
                 pil_image = Image.open(BytesIO(img_response.content))
-                if pil_image.mode != 'RGB':
+                if pil_image.mode == 'RGBA':
+                    pass
+                elif pil_image.mode == 'LA':
+                    pil_image = pil_image.convert('RGBA')
+                elif pil_image.mode == 'P' and 'transparency' in pil_image.info:
+                    pil_image = pil_image.convert('RGBA')
+                elif pil_image.mode != 'RGB':
                     pil_image = pil_image.convert('RGB')
                 image_np = np.array(pil_image).astype(np.float32) / 255.0
                 image_tensor = torch.from_numpy(image_np)[None,]
@@ -1502,7 +1514,13 @@ class QIBOBatchImageEditNode:
                 if img_response.status_code != 200:
                     raise Exception(f"图片下载失败: {img_response.status_code}")
                 pil_image = Image.open(BytesIO(img_response.content))
-                if pil_image.mode != 'RGB':
+                if pil_image.mode == 'RGBA':
+                    pass
+                elif pil_image.mode == 'LA':
+                    pil_image = pil_image.convert('RGBA')
+                elif pil_image.mode == 'P' and 'transparency' in pil_image.info:
+                    pil_image = pil_image.convert('RGBA')
+                elif pil_image.mode != 'RGB':
                     pil_image = pil_image.convert('RGB')
                 image_np = np.array(pil_image).astype(np.float32) / 255.0
                 image_tensor = torch.from_numpy(image_np)[None,]

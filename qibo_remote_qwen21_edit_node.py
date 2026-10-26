@@ -219,7 +219,15 @@ class QIBORemoteQwen21EditNode:
                         q = {"filename": img["filename"], "subfolder": img.get("subfolder", ""), "type": img.get("type", "output")}
                         ir = requests.get(f"{base_url}/view", params=q, verify=verify, timeout=60)
                         if ir.status_code == 200:
-                            pil = Image.open(io.BytesIO(ir.content)).convert("RGB")
+                            pil = Image.open(io.BytesIO(ir.content))
+                            if pil.mode == 'RGBA':
+                                pass
+                            elif pil.mode == 'LA':
+                                pil = pil.convert('RGBA')
+                            elif pil.mode == 'P' and 'transparency' in pil.info:
+                                pil = pil.convert('RGBA')
+                            elif pil.mode != 'RGB':
+                                pil = pil.convert('RGB')
                             arr = np.array(pil).astype(np.float32) / 255.0
                             tensor = torch.from_numpy(arr)[None,]
                             print(f"✅ 远程编辑完成，耗时 {int(time.time() - start)}s，尺寸 {pil.size}")
