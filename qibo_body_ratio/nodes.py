@@ -41,7 +41,7 @@ class QIBOPoseCorrect:
                 "详细日志": ("BOOLEAN", {"default": False, "label_on": "开", "label_off": "关", "tooltip": "启用详细内部日志"}),
                 "置信度阈值": ("FLOAT", {"default": 0.30, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "WSCS 和参考门控的统一置信度阈值"}),
                 "输出绝对坐标": ("BOOLEAN", {"default": True, "label_on": "绝对像素", "label_off": "归一化(0-1)"}),
-                "签名": ("BOOLEAN", {"default": True, "label_on": "by wuwukasi(bilibili)", "label_off": "by wuwukasi(bilibili)"}),
+
             },
         }
 
@@ -73,7 +73,7 @@ class QIBOPoseCorrect:
         "详细日志": "print_detailed_logs",
         "置信度阈值": "confidence_threshold",
         "输出绝对坐标": "output_absolute_coordinates",
-        "签名": "signature",
+
     }
 
     _MODE_MAP = {

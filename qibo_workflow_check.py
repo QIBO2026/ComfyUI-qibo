@@ -210,6 +210,93 @@ def _get_install_state():
         return dict(_install_state)
 
 
+_update_comfyui_state = {
+    "status": "idle",
+    "step": "",
+    "log": "",
+    "started_at": 0,
+    "finished_at": 0,
+    "error": "",
+}
+_update_comfyui_lock = threading.Lock()
+_COMFYUI_ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
+
+
+def _set_update_comfyui_state(**kwargs):
+    with _update_comfyui_lock:
+        _update_comfyui_state.update(kwargs)
+
+
+def _get_update_comfyui_state():
+    with _update_comfyui_lock:
+        return dict(_update_comfyui_state)
+
+
+def _update_comfyui_worker():
+    _set_update_comfyui_state(
+        status="running", step="git pull", log="",
+        started_at=time.time(), finished_at=0, error="",
+    )
+    log_lines = []
+    try:
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", _COMFYUI_ROOT],
+            capture_output=True,
+        )
+        proc = subprocess.Popen(
+            ["git", "pull"],
+            cwd=_COMFYUI_ROOT,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            bufsize=1,
+        )
+        for line in proc.stdout:
+            log_lines.append(line)
+            _set_update_comfyui_state(log="".join(log_lines))
+        proc.wait(timeout=180)
+        if proc.returncode != 0:
+            _set_update_comfyui_state(
+                status="error", step="git pull", finished_at=time.time(),
+                error="git pull 失败 (returncode=%d)" % proc.returncode,
+            )
+            return
+        _set_update_comfyui_state(step="pip install")
+        req_file = os.path.join(_COMFYUI_ROOT, "requirements.txt")
+        if not os.path.exists(req_file):
+            _set_update_comfyui_state(
+                status="error", step="pip install", finished_at=time.time(),
+                error="requirements.txt 不存在: %s" % req_file,
+            )
+            return
+        proc2 = subprocess.Popen(
+            [sys.executable, "-m", "pip", "install", "-r", req_file],
+            cwd=_COMFYUI_ROOT,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            bufsize=1,
+        )
+        for line in proc2.stdout:
+            log_lines.append(line)
+            _set_update_comfyui_state(log="".join(log_lines))
+        proc2.wait(timeout=600)
+        if proc2.returncode != 0:
+            _set_update_comfyui_state(
+                status="error", step="pip install", finished_at=time.time(),
+                error="pip install 失败 (returncode=%d)" % proc2.returncode,
+            )
+            return
+        _set_update_comfyui_state(
+            status="done", step="", finished_at=time.time(),
+            log="".join(log_lines),
+        )
+    except subprocess.TimeoutExpired:
+        _set_update_comfyui_state(
+            status="error", finished_at=time.time(), error="超时",
+        )
+    except Exception as e:
+        _set_update_comfyui_state(
+            status="error", finished_at=time.time(), error=str(e),
+        )
+
+
 def _repo_dir_name(url):
     base = url.rstrip("/").split("/")[-1]
     if base.endswith(".git"):
@@ -894,3 +981,14 @@ def register_server_routes():
             tb = traceback.format_exc()
             _safe_print(f"[QIBO] print_manifest 异常:\n{tb}")
             return web.json_response({"error": f"打印清单失败: {e}", "traceback": tb[-3000:]})
+    @routes.post("/qibo/update_comfyui")
+    async def qibo_update_comfyui(request):
+        st = _get_update_comfyui_state()
+        if st["status"] == "running":
+            return web.json_response({"status": "busy", "msg": "更新正在进行中"})
+        threading.Thread(target=_update_comfyui_worker, daemon=True).start()
+        return web.json_response({"status": "started"})
+
+    @routes.get("/qibo/update_comfyui_progress")
+    async def qibo_update_comfyui_progress(request):
+        return web.json_response(_get_update_comfyui_state())
