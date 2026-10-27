@@ -14,7 +14,7 @@ app.registerExtension({
             const self = this;
 
             const container = document.createElement("div");
-            container.style.cssText = "position:relative;width:100%;height:320px;overflow:hidden;background:#222;";
+            container.style.cssText = "position:relative;width:100%;height:100%;overflow:hidden;background:#222;";
 
             const imgA = document.createElement("img");
             const imgB = document.createElement("img");
@@ -42,8 +42,19 @@ app.registerExtension({
             container.appendChild(hint);
 
             const w = this.addDOMWidget("qibo_compare", "div", container, { serialize: false });
-            w.options.getHeight = () => 320;
+            const HEADER_OFFSET = 110;
+            w.options.getHeight = () => Math.max(120, self.size[1] - HEADER_OFFSET);
+            w.options.onResize = () => { w.options.getHeight && (w.last_y != null); };
             if (!this.size || this.size[0] < 400) this.size = [420, 460];
+
+            const origResize = this.onResize || function () {};
+            this.onResize = function () {
+                origResize.apply(this, arguments);
+                const h = Math.max(120, self.size[1] - HEADER_OFFSET);
+                container.style.height = h + "px";
+                if (self.graph) self.setDirtyCanvas(true, true);
+            };
+            container.style.height = Math.max(120, self.size[1] - HEADER_OFFSET) + "px";
 
             let mode = "slide";
             let splitX = 50;
