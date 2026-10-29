@@ -1208,6 +1208,7 @@ app.registerExtension({
                 const listWrap = document.createElement("div");
                 listWrap.style.cssText = "flex:1 1 auto;overflow-y:auto;padding:4px 0;min-height:0;";
                 const totalSize = items.reduce((s, it) => s + (it.size || 0), 0);
+                const rows = [];
                 items.forEach((it, i) => {
                     const row = document.createElement("div");
                     row.style.cssText = "display:flex;gap:10px;padding:6px 18px;font-size:12px;color:" + COL_FG + ";align-items:center;";
@@ -1266,6 +1267,7 @@ app.registerExtension({
                     });
                     row.appendChild(idx); row.appendChild(name); row.appendChild(size); row.appendChild(path);
                     listWrap.appendChild(row);
+                    rows.push({ it, path, refreshPath });
                 });
                 card.appendChild(listWrap);
                 const summary = document.createElement("div");
@@ -1273,14 +1275,56 @@ app.registerExtension({
                 summary.textContent = "总计 " + items.length + " 个文件，合计 " + fmtSize(totalSize);
                 card.appendChild(summary);
                 const btnRow = document.createElement("div");
-                btnRow.style.cssText = "padding:12px 18px;border-top:1px solid " + COL_BORDER + ";display:flex;justify-content:flex-end;gap:10px;";
+                btnRow.style.cssText = "padding:12px 18px;border-top:1px solid " + COL_BORDER + ";display:flex;justify-content:flex-end;gap:10px;align-items:center;";
+                const matchBtn = document.createElement("button");
+                matchBtn.style.cssText = "background:#3e3e42;color:" + COL_FG + ";border:1px solid " + COL_BORDER + ";border-radius:4px;padding:7px 14px;font-size:13px;cursor:pointer;font-family:inherit;margin-right:auto;";
+                matchBtn.textContent = "自动匹配节点下载目录";
                 const cancelBtn = document.createElement("button");
                 cancelBtn.style.cssText = "background:#3e3e42;color:" + COL_FG + ";border:1px solid " + COL_BORDER + ";border-radius:4px;padding:7px 18px;font-size:13px;cursor:pointer;font-family:inherit;";
                 cancelBtn.textContent = "取消";
                 const okBtn = document.createElement("button");
                 okBtn.style.cssText = "background:#007acc;color:#fff;border:none;border-radius:4px;padding:7px 18px;font-size:13px;cursor:pointer;font-family:inherit;";
                 okBtn.textContent = "确定下载";
-                btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+                btnRow.appendChild(matchBtn); btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+                matchBtn.onclick = async () => {
+                    if (matchBtn.disabled) return;
+                    matchBtn.disabled = true;
+                    const oldText = matchBtn.textContent;
+                    matchBtn.textContent = "匹配中...";
+                    try {
+                        const r = await fetch("/qibo/resolve_model_folders", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ items: items.map((it) => ({ name: it.name, folder: it.folder || "checkpoints", subpath: it.subpath || "" })) }),
+                        });
+                        const raw = await r.text();
+                        let res;
+                        try { res = JSON.parse(raw); } catch (e) { res = { __error: "HTTP " + r.status + ": " + raw.slice(0, 200) }; }
+                        if (res.__error || res.error) {
+                            matchBtn.textContent = "❌ " + (res.__error || res.error);
+                            setTimeout(() => { matchBtn.textContent = oldText; matchBtn.disabled = false; }, 2500);
+                            return;
+                        }
+                        const results = res.results || [];
+                        let changed = 0;
+                        for (let i = 0; i < results.length && i < rows.length; i++) {
+                            const rr = results[i];
+                            const row = rows[i];
+                            if (rr.changed) {
+                                row.it.folder = rr.folder;
+                                row.it.name = rr.name;
+                                row.it.subpath = rr.subpath || "";
+                                row.refreshPath();
+                                changed++;
+                            }
+                        }
+                        matchBtn.textContent = `已匹配 ${changed}/${items.length} 项目录`;
+                        setTimeout(() => { matchBtn.textContent = oldText; matchBtn.disabled = false; }, 2500);
+                    } catch (e) {
+                        matchBtn.textContent = "❌ " + e;
+                        setTimeout(() => { matchBtn.textContent = oldText; matchBtn.disabled = false; }, 2500);
+                    }
+                };
                 card.appendChild(btnRow);
                 overlay.appendChild(card);
                 document.body.appendChild(overlay);

@@ -803,6 +803,48 @@ def register_server_routes():
 
     routes = PromptServer.instance.routes
 
+    @routes.post("/qibo/resolve_model_folders")
+    async def qibo_resolve_model_folders(request):
+        """对一组模型项，用节点目录匹配算法反查真实 folder。
+        body: {items: [{name, folder, subpath}, ...]}
+        返回: {results: [{name, folder, subpath, changed}, ...]}
+        已下载文件按 basename 扫描所有注册目录定位；未下载按值前缀匹配注册名。
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        items = payload.get("items") or []
+        idx = {}
+        try:
+            import folder_paths as fp
+            for folder in fp.folder_names_and_paths:
+                try:
+                    files = fp.get_filename_list(folder)
+                except Exception:
+                    continue
+                for f in files:
+                    base = f.replace("\\", "/").split("/")[-1]
+                    if base and base not in idx:
+                        idx[base] = folder
+        except Exception:
+            pass
+        results = []
+        for it in items:
+            name = (it.get("name") or "").strip()
+            folder = (it.get("folder") or "checkpoints").strip()
+            subpath = (it.get("subpath") or "").strip()
+            basename = name.replace("\\", "/").split("/")[-1]
+            new_folder = idx.get(basename)
+            if not new_folder:
+                full = "/".join([p for p in [folder, subpath, name] if p])
+                new_folder = _guess_folder_by_value(full)
+            if new_folder and new_folder != folder:
+                results.append({"name": basename, "folder": new_folder, "subpath": "", "changed": True})
+            else:
+                results.append({"name": name, "folder": folder, "subpath": subpath, "changed": False})
+        return web.json_response({"results": results})
+
     @routes.post("/qibo/workflow_check")
     async def qibo_workflow_check(request):
         try:
