@@ -1203,7 +1203,7 @@ app.registerExtension({
                 card.style.cssText = "background:" + COL_BG + ";border:1px solid " + COL_BORDER + ";border-radius:8px;width:600px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.5);";
                 const title = document.createElement("div");
                 title.style.cssText = "padding:14px 18px;border-bottom:1px solid " + COL_BORDER + ";font-size:14px;font-weight:600;color:" + COL_FG + ";";
-                title.textContent = "确认下载 " + items.length + " 个文件";
+                title.textContent = "确认下载 " + items.length + " 个文件（双击路径可修改目录/文件名）";
                 card.appendChild(title);
                 const listWrap = document.createElement("div");
                 listWrap.style.cssText = "flex:1 1 auto;overflow-y:auto;padding:4px 0;min-height:0;";
@@ -1222,10 +1222,48 @@ app.registerExtension({
                     size.style.cssText = "color:" + COL_DIM + ";width:72px;flex-shrink:0;text-align:right;";
                     size.textContent = fmtSize(it.size || 0);
                     const path = document.createElement("span");
-                    path.style.cssText = "color:#4caf50;width:220px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
-                    const pathText = "models/" + it.folder + "/" + it.name;
-                    path.textContent = pathText;
-                    path.title = pathText;
+                    path.style.cssText = "color:#4caf50;width:260px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:text;";
+                    const buildRelPath = () => {
+                        const parts = [it.folder || "checkpoints"];
+                        if (it.subpath) parts.push(it.subpath);
+                        parts.push(it.name);
+                        return parts.filter(Boolean).join("/");
+                    };
+                    const refreshPath = () => {
+                        const rel = buildRelPath();
+                        path.textContent = "models/" + rel;
+                        path.title = "双击编辑路径/文件名";
+                        name.textContent = it.name;
+                        name.title = it.name;
+                    };
+                    refreshPath();
+                    path.addEventListener("dblclick", () => {
+                        const input = document.createElement("input");
+                        input.type = "text";
+                        input.value = buildRelPath();
+                        input.style.cssText = "width:260px;flex-shrink:0;font-size:12px;font-family:inherit;background:#2d2d30;color:#4caf50;border:1px solid #007acc;border-radius:3px;padding:2px 4px;outline:none;";
+                        path.replaceWith(input);
+                        input.focus();
+                        input.select();
+                        const commit = () => {
+                            const raw = (input.value || "").trim().replace(/\\/g, "/");
+                            const parts = raw.split("/").map((s) => s.trim()).filter((s) => s && s !== "." && s !== "..");
+                            if (parts.length >= 2) {
+                                it.folder = parts[0];
+                                it.name = parts[parts.length - 1];
+                                it.subpath = parts.length > 2 ? parts.slice(1, -1).join("/") : "";
+                            } else if (parts.length === 1) {
+                                it.name = parts[0];
+                            }
+                            input.replaceWith(path);
+                            refreshPath();
+                        };
+                        input.addEventListener("keydown", (ev) => {
+                            if (ev.key === "Enter") { ev.preventDefault(); commit(); }
+                            else if (ev.key === "Escape") { input.replaceWith(path); refreshPath(); }
+                        });
+                        input.addEventListener("blur", commit);
+                    });
                     row.appendChild(idx); row.appendChild(name); row.appendChild(size); row.appendChild(path);
                     listWrap.appendChild(row);
                 });
@@ -1311,12 +1349,12 @@ app.registerExtension({
                     return;
                 }
 
-                const dlFiles = selected.map(f => ({
+                const dlFiles = selected.map((f, i) => ({
                     direct_url: f.direct_url,
-                    name: f.name,
+                    name: dlItems[i].name,
                     size: f.size || 0,
-                    local_folder: f.local_folder,
-                    subpath: f.subpath || "",
+                    local_folder: dlItems[i].folder,
+                    subpath: dlItems[i].subpath || "",
                     rename_to: "",
                 }));
 

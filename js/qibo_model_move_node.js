@@ -155,49 +155,121 @@ function showMoveDialog(node) {
                 const scope = targets.length > 0 ? targets : [items.find((it) => it.row === row)].filter(Boolean);
                 if (scope.length === 0) return;
                 const scopeFolders = new Set(scope.map((it) => it.m.folder));
-                const menu = document.createElement("div");
-                menu.id = "qibo-move-folder-menu";
-                const mx = Math.min(e.clientX, Math.max(10, window.innerWidth - 200));
-                const my = Math.min(e.clientY, Math.max(10, window.innerHeight - 360));
-                menu.style.cssText = `position:fixed;left:${mx}px;top:${my}px;z-index:100002;background:${COL_BG};border:1px solid ${COL_BORDER};border-radius:4px;padding:4px 0;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size:12px;min-width:180px;max-height:340px;overflow-y:auto;`;
-                const mt = document.createElement("div");
-                mt.style.cssText = `color:${COL_DIM};padding:4px 12px;border-bottom:1px solid ${COL_BORDER};margin-bottom:2px;position:sticky;top:0;background:${COL_BG};`;
-                mt.textContent = scopeFolders.size > 1 ? `移动 ${scope.length} 个模型到目录` : `移动 ${scope.length} 个模型到目录（当前: ${[...scopeFolders][0]}）`;
-                menu.appendChild(mt);
+
                 const folders = await fetchFolders();
-                for (const fd of folders) {
+                const rootParts = [...new Set(folders.map((f) => f.split("/")[0]))];
+                const expanded = new Set(rootParts);
+                const renderFolderItems = (parentPrefix) => {
+                    const directChildren = [];
+                    const seen = new Set();
+                    for (const fd of folders) {
+                        const parts = fd.split("/");
+                        if (parentPrefix === "") {
+                            if (parts.length === 1 && !seen.has(parts[0])) {
+                                seen.add(parts[0]); directChildren.push({ name: parts[0], full: parts[0], isLeaf: true });
+                            }
+                        } else {
+                            const prefix = parentPrefix + "/";
+                            if (fd.startsWith(prefix)) {
+                                const rest = fd.slice(prefix.length);
+                                const first = rest.split("/")[0];
+                                const full = parentPrefix + "/" + first;
+                                if (!seen.has(first)) {
+                                    seen.add(first);
+                                    const isLeaf = folders.includes(full);
+                                    directChildren.push({ name: first, full, isLeaf });
+                                }
+                            }
+                        }
+                    }
+                    directChildren.sort((a, b) => a.name.localeCompare(b.name));
+                    return directChildren;
+                };
+                const buildItem = (entry, depth) => {
+                    const fd = entry.full;
+                    const isDir = !entry.isLeaf || folders.some((f) => f.startsWith(fd + "/") && f !== fd);
+                    const hasChildren = folders.some((f) => f.startsWith(fd + "/"));
                     const allSame = scopeFolders.size === 1 && scopeFolders.has(fd);
                     const opt = document.createElement("div");
                     opt.style.cssText = `padding:5px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;color:${COL_FG};${allSame ? "opacity:0.4;" : ""}`;
+                    if (depth > 0) opt.style.paddingLeft = (12 + depth * 14) + "px";
                     opt.onmouseover = () => { if (!allSame) { opt.style.background = "#337ab7"; opt.style.color = "#fff"; } };
                     opt.onmouseout = () => { opt.style.background = "transparent"; opt.style.color = COL_FG; };
-                    const txt = document.createElement("span");
-                    txt.textContent = fd;
-                    txt.title = "models/" + fd;
-                    opt.appendChild(txt);
-                    if (allSame) {
-                        const same = document.createElement("span");
-                        same.style.cssText = `color:${COL_DIM};font-size:11px;margin-left:auto;`;
-                        same.textContent = "(同目录)";
-                        opt.appendChild(same);
+                    if (hasChildren) {
+                        const toggle = document.createElement("span");
+                        toggle.style.cssText = `color:${COL_DIM};width:12px;display:inline-block;`;
+                        toggle.textContent = expanded.has(fd) ? "▾" : "▸";
+                        opt.appendChild(toggle);
+                        const txt = document.createElement("span");
+                        txt.textContent = entry.name + "/";
+                        txt.title = "models/" + fd;
+                        opt.appendChild(txt);
+                        if (!allSame) {
+                            opt.onclick = (ev) => {
+                                ev.stopPropagation();
+                                if (expanded.has(fd)) expanded.delete(fd); else expanded.add(fd);
+                                menu.remove();
+                                rebuildMenu();
+                            };
+                        }
                     } else {
-                        opt.onclick = (ev) => {
-                            ev.stopPropagation();
-                            for (const it of scope) {
-                                it.target = fd;
-                                it.targetSpan.textContent = "→ " + fd;
-                                if (!it.cb.checked) it.cb.checked = true;
-                            }
-                            syncSelAll();
-                            menu.remove();
-                            statusSpan.textContent = `已指定 ${scope.length} 个模型移动到 ${fd}，点「移动选中」执行`;
-                        };
+                        const spacer = document.createElement("span");
+                        spacer.style.cssText = `width:12px;display:inline-block;`;
+                        opt.appendChild(spacer);
+                        const txt = document.createElement("span");
+                        txt.textContent = entry.name;
+                        txt.title = "models/" + fd;
+                        opt.appendChild(txt);
+                        if (allSame) {
+                            const same = document.createElement("span");
+                            same.style.cssText = `color:${COL_DIM};font-size:11px;margin-left:auto;`;
+                            same.textContent = "(同目录)";
+                            opt.appendChild(same);
+                        } else {
+                            opt.onclick = (ev) => {
+                                ev.stopPropagation();
+                                for (const it of scope) {
+                                    it.target = fd;
+                                    it.targetSpan.textContent = "→ " + fd;
+                                    if (!it.cb.checked) it.cb.checked = true;
+                                }
+                                syncSelAll();
+                                menu.remove();
+                                statusSpan.textContent = `已指定 ${scope.length} 个模型移动到 ${fd}，点「移动选中」执行`;
+                            };
+                        }
                     }
-                    menu.appendChild(opt);
-                }
-                document.body.appendChild(menu);
-                const closeMenu = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("mousedown", closeMenu); } };
-                setTimeout(() => document.addEventListener("mousedown", closeMenu), 0);
+                    return opt;
+                };
+                const rebuildMenu = () => {
+                    const oldm = document.getElementById("qibo-move-folder-menu");
+                    if (oldm) oldm.remove();
+                    const m = document.createElement("div");
+                    m.id = "qibo-move-folder-menu";
+                    const mx2 = Math.min(e.clientX, Math.max(10, window.innerWidth - 240));
+                    const my2 = Math.min(e.clientY, Math.max(10, window.innerHeight - 480));
+                    m.style.cssText = `position:fixed;left:${mx2}px;top:${my2}px;z-index:100002;background:${COL_BG};border:1px solid ${COL_BORDER};border-radius:4px;padding:4px 0;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size:12px;min-width:220px;max-height:460px;overflow-y:auto;`;
+                    const mt2 = document.createElement("div");
+                    mt2.style.cssText = `color:${COL_DIM};padding:4px 12px;border-bottom:1px solid ${COL_BORDER};margin-bottom:2px;position:sticky;top:0;background:${COL_BG};`;
+                    mt2.textContent = scopeFolders.size > 1 ? `移动 ${scope.length} 个模型到目录` : `移动 ${scope.length} 个模型到目录（当前: ${[...scopeFolders][0]}）`;
+                    m.appendChild(mt2);
+                    const renderLevel = (parentPrefix, depth) => {
+                        const children = renderFolderItems(parentPrefix);
+                        for (const entry of children) {
+                            m.appendChild(buildItem(entry, depth));
+                            if (expanded.has(entry.full) && folders.some((f) => f.startsWith(entry.full + "/"))) {
+                                renderLevel(entry.full, depth + 1);
+                            }
+                        }
+                    };
+                    renderLevel("", 0);
+                    document.body.appendChild(m);
+                    const closeMenu2 = (ev) => { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener("mousedown", closeMenu2); } };
+                    setTimeout(() => document.addEventListener("mousedown", closeMenu2), 0);
+                    menu = m;
+                };
+                let menu = null;
+                rebuildMenu();
             };
         }
         if (count === 0) {

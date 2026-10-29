@@ -957,7 +957,10 @@ def register_server_routes():
         direct_url = (payload.get("direct_url") or "").strip() or None
         model_id = (payload.get("model_id") or "").strip() or None
         subpath = (payload.get("subpath") or "").strip()
-        subpath_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
+        folder_parts = [p for p in folder.replace("\\", "/").split("/") if p and p != "."]
+        base_folder = folder_parts[0] if folder_parts else "checkpoints"
+        extra_sub = folder_parts[1:] if len(folder_parts) > 1 else []
+        subpath_parts = extra_sub + [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
         rename_to = (payload.get("rename_to") or "").strip()
         remote_size = 0
         try:
@@ -967,9 +970,9 @@ def register_server_routes():
         if direct_url:
             direct_url = _to_hf_mirror(_clean_url(direct_url))
 
-        dest_dir = _resolve_dest_dir(folder)
+        dest_dir = _resolve_dest_dir(base_folder)
         if not dest_dir:
-            return web.json_response({"error": f"未找到模型目录: {folder}"})
+            return web.json_response({"error": f"未找到模型目录: {base_folder}"})
 
         if direct_url:
             fname = filename or os.path.basename(urllib.parse.urlparse(direct_url).path) or "model.bin"
@@ -1330,11 +1333,28 @@ def register_server_routes():
             import folder_paths as fp
             base = getattr(fp, "models_dir", None)
             if base and os.path.isdir(base):
-                for name in sorted(os.listdir(base)):
-                    if os.path.isdir(os.path.join(base, name)) and not name.startswith("."):
-                        folders.append(name)
+                base = os.path.realpath(base)
+                max_depth = 6
+                stack = [(base, "", 0)]
+                while stack:
+                    cur, rel, depth = stack.pop()
+                    try:
+                        names = sorted(os.listdir(cur))
+                    except Exception:
+                        continue
+                    for name in names:
+                        if name.startswith("."):
+                            continue
+                        full = os.path.join(cur, name)
+                        if not os.path.isdir(full):
+                            continue
+                        sub_rel = (rel + "/" + name) if rel else name
+                        folders.append(sub_rel)
+                        if depth + 1 < max_depth:
+                            stack.append((full, sub_rel, depth + 1))
         except Exception:
             folders = []
+        folders.sort()
         return web.json_response({"folders": folders})
 
 
@@ -1363,9 +1383,17 @@ def register_server_routes():
         base = _models_base_dir()
         if not base:
             return web.json_response({"error": "未找到 models 目录", "results": []})
-        dest_dir = os.path.realpath(os.path.join(base, dest_folder))
-        if not dest_dir.startswith(base + os.sep) or not os.path.isdir(dest_dir):
+        base = os.path.realpath(base)
+        dest_parts = [p for p in dest_folder.replace("\\", "/").split("/") if p and p not in (".", "..")]
+        if not dest_parts:
             return web.json_response({"error": f"非法目标目录: {dest_folder}", "results": []})
+        dest_dir = os.path.realpath(os.path.join(base, *dest_parts))
+        if not dest_dir.startswith(base + os.sep):
+            return web.json_response({"error": f"非法目标目录: {dest_folder}", "results": []})
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+        except Exception as e:
+            return web.json_response({"error": f"无法创建目标目录: {e}", "results": []})
 
         results = []
         for item in models:
@@ -1408,11 +1436,14 @@ def register_server_routes():
             direct_url = _to_hf_mirror(_clean_url(direct_url)) if direct_url else direct_url
             fname = f.get("name") or os.path.basename(f.get("path", ""))
             subpath = (f.get("subpath") or "").strip()
-            subpath_parts = [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
+            folder_parts = [p for p in folder.replace("\\", "/").split("/") if p and p != "."]
+            base_folder = folder_parts[0] if folder_parts else default_folder
+            extra_sub = folder_parts[1:] if len(folder_parts) > 1 else []
+            subpath_parts = extra_sub + [p for p in subpath.replace("\\", "/").split("/") if p and p != "."]
             rename_to = (f.get("rename_to") or "").strip()
-            dest_dir = _resolve_dest_dir(folder)
+            dest_dir = _resolve_dest_dir(base_folder)
             if not dest_dir:
-                results.append({"name": rename_to or fname, "error": f"未找到目录: {folder}"})
+                results.append({"name": rename_to or fname, "error": f"未找到目录: {base_folder}"})
                 continue
             if subpath_parts:
                 dest = os.path.join(dest_dir, *subpath_parts, fname)

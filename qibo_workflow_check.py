@@ -493,6 +493,100 @@ def _guess_folder_by_class(class_type):
     return "checkpoints"
 
 
+_node_field_index_cache = {}
+
+
+def _build_node_field_index(class_type, field):
+    """从节点 INPUT_TYPES 提取字段可选值列表，反查每个可选值实际所属的 folder。
+    返回 {可选值字符串: folder名}。缓存 per (class_type, field)。
+    用于 ultralyticsDetectorForDetailerFix 这类自定义目录节点：
+    其 model_name 列表元素形如 "bbox/face_yolov8m.pt"，实际 folder 是 ultralytics_bbox。
+    """
+    key = (class_type, field)
+    if key in _node_field_index_cache:
+        return _node_field_index_cache[key]
+    idx = {}
+    try:
+        from nodes import NODE_CLASS_MAPPINGS
+        cls = NODE_CLASS_MAPPINGS.get(class_type)
+        if cls is not None:
+            its = cls.INPUT_TYPES()
+            v = None
+            for sec in ("required", "optional"):
+                d = its.get(sec) or {}
+                if field in d:
+                    v = d[field]
+                    break
+            options = None
+            if isinstance(v, (tuple, list)) and v and isinstance(v[0], list):
+                options = [str(x) for x in v[0] if x]
+            if options:
+                try:
+                    import folder_paths as fp
+                    folder_files = {}
+                    for folder in fp.folder_names_and_paths:
+                        try:
+                            folder_files[folder] = set(fp.get_filename_list(folder))
+                        except Exception:
+                            folder_files[folder] = set()
+                except Exception:
+                    folder_files = {}
+                for opt in options:
+                    norm = opt.replace("\\", "/")
+                    base = norm.split("/")[-1]
+                    matched = None
+                    for folder, fs in folder_files.items():
+                        if opt in fs or norm in fs:
+                            matched = folder
+                            break
+                    if matched is None:
+                        for folder, fs in folder_files.items():
+                            if base in fs:
+                                matched = folder
+                                break
+                    if matched:
+                        idx[opt] = matched
+    except Exception:
+        pass
+    _node_field_index_cache[key] = idx
+    return idx
+
+
+def _guess_folder_by_value(value):
+    """按模型值路径的前缀段匹配 folder_names_and_paths 注册名。
+    例: "bbox/face_yolov8m.pt" -> "ultralytics_bbox"（注册名含 "bbox"）。
+    仅当值含子目录前缀时启用，避免对普通文件名误判。
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        import folder_paths as fp
+        names = list(fp.folder_names_and_paths.keys())
+    except Exception:
+        return None
+    norm = value.replace("\\", "/")
+    parts = [p for p in norm.split("/") if p]
+    if len(parts) < 2:
+        return None
+    prefixes = [p.lower() for p in parts[:-1] if len(p) >= 3]
+    if not prefixes:
+        return None
+    best = None
+    best_score = 0
+    for name in names:
+        nl = name.lower()
+        score = 0
+        for c in prefixes:
+            if c in nl:
+                score += len(c)
+        if score > best_score:
+            best_score = score
+            best = name
+    if best_score >= 3:
+        return best
+    return None
+
+
 def _split_subpath(value):
     """把含子目录的模型路径拆成 (subpath, basename)。
     subpath 用 / 分隔（前端/下载时再按系统拼接）。
@@ -600,7 +694,29 @@ def _check(payload):
                     "is_placeholder": True,
                 })
                 continue
-            folder = _resolve_folder(class_type, k)
+            field_idx = _build_node_field_index(class_type, k)
+            if v in field_idx:
+                folder = field_idx[v]
+                basename = v.replace("\\", "/").split("/")[-1]
+                required_models.append({
+                    "node_id": str(node_id),
+                    "class_type": class_type,
+                    "field": k,
+                    "value": basename,
+                    "orig_value": v,
+                    "subpath": "",
+                    "folder": folder,
+                    "is_placeholder": False,
+                })
+                continue
+            folder = None
+            value_prefix_folder = False
+            if "/" in v.replace("\\", "/"):
+                folder = _guess_folder_by_value(v)
+                if folder:
+                    value_prefix_folder = True
+            if not folder:
+                folder = _resolve_folder(class_type, k)
             if not folder and node_hint_folder:
                 ext = os.path.splitext(v.lower())[1]
                 if ext in MODEL_EXTENSIONS or "/" in v.replace("\\", "/"):
@@ -611,7 +727,11 @@ def _check(payload):
                     folder = _guess_folder_by_class(class_type)
                 else:
                     continue
-            subpath, basename = _split_subpath(v)
+            if value_prefix_folder:
+                subpath = ""
+                basename = v.replace("\\", "/").split("/")[-1]
+            else:
+                subpath, basename = _split_subpath(v)
             required_models.append({
                 "node_id": str(node_id),
                 "class_type": class_type,
