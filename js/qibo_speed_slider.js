@@ -17,24 +17,48 @@ app.registerExtension({
                 if (!w || !w.inputEl || w.__qiboSliderInstalled) return;
                 w.__qiboSliderInstalled = true;
 
+                if (w.inputEl.parentElement) {
+                    w.inputEl.parentElement.style.display = "none";
+                }
+
+                const wrap = document.createElement("div");
+                wrap.style.cssText = "width:100%;padding:6px 4px 2px;box-sizing:border-box;font-family:inherit;";
+
+                const labelRow = document.createElement("div");
+                labelRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#858585;margin-bottom:4px;";
+                const minLabel = document.createElement("span");
+                minLabel.textContent = "-10";
+                const valBox = document.createElement("span");
+                valBox.style.cssText = "color:#4caf50;font-weight:600;font-size:13px;min-width:48px;text-align:center;background:#2d2d30;border-radius:3px;padding:1px 6px;";
+                valBox.textContent = "0.0";
+                const maxLabel = document.createElement("span");
+                maxLabel.textContent = "+10";
+                labelRow.appendChild(minLabel);
+                labelRow.appendChild(valBox);
+                labelRow.appendChild(maxLabel);
+                wrap.appendChild(labelRow);
+
                 const slider = document.createElement("input");
                 slider.type = "range";
                 slider.min = "-10";
                 slider.max = "10";
                 slider.step = "0.1";
                 slider.value = String(w.value ?? 0);
-                slider.style.cssText = "width:100%;margin:4px 0 2px;accent-color:#007acc;cursor:pointer;";
+                slider.style.cssText = "width:100%;height:22px;accent-color:#007acc;cursor:pointer;margin:0;";
 
-                const valBox = document.createElement("span");
-                valBox.style.cssText = "display:inline-block;min-width:48px;text-align:right;color:#4caf50;font-size:12px;margin-left:8px;";
-                valBox.textContent = (parseFloat(slider.value)).toFixed(1);
+                const tickRow = document.createElement("div");
+                tickRow.style.cssText = "display:flex;justify-content:space-between;font-size:9px;color:#555;margin-top:2px;padding:0 2px;";
+                for (let i = -10; i <= 10; i += 5) {
+                    const t = document.createElement("span");
+                    t.textContent = i;
+                    tickRow.appendChild(t);
+                }
 
-                const wrap = document.createElement("div");
-                wrap.style.cssText = "display:flex;align-items:center;width:100%;";
                 wrap.appendChild(slider);
-                wrap.appendChild(valBox);
+                wrap.appendChild(tickRow);
 
-                w.inputEl.parentElement?.appendChild(wrap);
+                const host = w.inputEl.parentElement?.parentElement || w.inputEl.parentElement;
+                if (host) host.appendChild(wrap);
 
                 const syncFromWidget = () => {
                     const v = parseFloat(w.value) || 0;
@@ -44,7 +68,6 @@ app.registerExtension({
                 slider.addEventListener("input", () => {
                     const v = parseFloat(slider.value) || 0;
                     w.value = v;
-
                     if (w.inputEl) w.inputEl.value = String(v);
                     valBox.textContent = v.toFixed(1);
                     self.setDirtyCanvas(true, true);
@@ -52,10 +75,12 @@ app.registerExtension({
                 w.inputEl.addEventListener("input", syncFromWidget);
                 w.inputEl.addEventListener("change", syncFromWidget);
                 w.__qiboSyncSlider = syncFromWidget;
+                syncFromWidget();
             };
 
             requestAnimationFrame(install);
             setTimeout(install, 50);
+            setTimeout(install, 200);
 
             const onConfigure = self.onConfigure;
             self.onConfigure = function () {
