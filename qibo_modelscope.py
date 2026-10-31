@@ -972,7 +972,15 @@ def register_server_routes():
 
         dest_dir = _resolve_dest_dir(base_folder)
         if not dest_dir:
-            return web.json_response({"error": f"未找到模型目录: {base_folder}"})
+            _mb = _models_base_dir()
+            if _mb:
+                dest_dir = os.path.join(_mb, base_folder)
+                try:
+                    os.makedirs(dest_dir, exist_ok=True)
+                except Exception as e:
+                    return web.json_response({"error": f"无法创建目录 {dest_dir}: {e}"})
+            else:
+                return web.json_response({"error": f"未找到模型目录: {base_folder}"})
 
         if direct_url:
             fname = filename or os.path.basename(urllib.parse.urlparse(direct_url).path) or "model.bin"
@@ -1443,8 +1451,17 @@ def register_server_routes():
             rename_to = (f.get("rename_to") or "").strip()
             dest_dir = _resolve_dest_dir(base_folder)
             if not dest_dir:
-                results.append({"name": rename_to or fname, "error": f"未找到目录: {base_folder}"})
-                continue
+                _mb = _models_base_dir()
+                if _mb:
+                    dest_dir = os.path.join(_mb, base_folder)
+                    try:
+                        os.makedirs(dest_dir, exist_ok=True)
+                    except Exception as e:
+                        results.append({"name": rename_to or fname, "error": f"无法创建目录 {dest_dir}: {e}"})
+                        continue
+                else:
+                    results.append({"name": rename_to or fname, "error": f"未找到目录: {base_folder}"})
+                    continue
             if subpath_parts:
                 dest = os.path.join(dest_dir, *subpath_parts, fname)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)

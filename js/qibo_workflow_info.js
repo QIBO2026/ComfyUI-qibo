@@ -1207,6 +1207,24 @@ app.registerExtension({
                 card.appendChild(title);
                 const listWrap = document.createElement("div");
                 listWrap.style.cssText = "flex:1 1 auto;overflow-y:auto;padding:4px 0;min-height:0;";
+                try {
+                    const rr = await fetch("/qibo/resolve_model_folders", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ items: items.map((it) => ({ name: it.name, folder: it.folder || "checkpoints", subpath: it.subpath || "" })) }),
+                    });
+                    if (rr.ok) {
+                        const rj = await rr.json();
+                        const results = rj.results || [];
+                        for (let i = 0; i < results.length && i < items.length; i++) {
+                            if (results[i].changed) {
+                                items[i].folder = results[i].folder;
+                                items[i].name = results[i].name;
+                                items[i].subpath = results[i].subpath || "";
+                            }
+                        }
+                    }
+                } catch (e) {}
                 const totalSize = items.reduce((s, it) => s + (it.size || 0), 0);
                 const rows = [];
                 items.forEach((it, i) => {
