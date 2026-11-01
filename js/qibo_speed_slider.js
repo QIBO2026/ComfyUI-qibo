@@ -4,6 +4,9 @@ const NODE_NAME = "QIBOSpeedSliderNode";
 const MIN = -10;
 const MAX = 10;
 const STEP = 0.1;
+const COL_BG = "#2e364a";
+const COL_YELLOW = "#ffd700";
+const COL_TRACK_DARK = "#0a0a0a";
 
 app.registerExtension({
     name: "QIBO.SpeedSlider",
@@ -17,58 +20,101 @@ app.registerExtension({
 
             const install = () => {
                 const w = self.widgets?.find((x) => x.name === "value");
-                if (!w || !w.inputEl || w.__qiboSliderInstalled) return;
+                if (!w || w.__qiboSliderInstalled) return;
+                if (typeof self.addDOMWidget !== "function") return;
+
                 w.__qiboSliderInstalled = true;
+                const hideDefaultWidget = () => {
+                    const candidates = [];
+                    if (w.element) candidates.push(w.element);
+                    if (w.inputEl) {
+                        candidates.push(w.inputEl.parentElement);
+                        candidates.push(w.inputEl.closest(".vue-widget, .propertywidget, .widget, .widget-row, .item"));
+                    }
+                    if (w.domEl) candidates.push(w.domEl);
+                    for (const el of candidates) {
+                        if (el && el !== container && !el.contains(container)) {
+                            el.style.display = "none";
+                            el.style.visibility = "hidden";
+                            el.style.height = "0";
+                            el.style.margin = "0";
+                            el.style.padding = "0";
+                        }
+                    }
+                };
+                hideDefaultWidget();
+                for (const d of [50, 200, 500, 1000, 1500]) setTimeout(hideDefaultWidget, d);
 
-                if (w.inputEl.parentElement) {
-                    w.inputEl.parentElement.style.display = "none";
-                }
+                const container = document.createElement("div");
+                container.style.cssText = `position:relative;width:100%;background:${COL_BG};border:1px solid #6b7280;border-radius:14px;padding:8px 10px 10px;box-sizing:border-box;font-family:inherit;user-select:none;overflow:hidden;`;
 
-                const wrap = document.createElement("div");
-                wrap.style.cssText = "width:100%;padding:8px 6px 4px;box-sizing:border-box;font-family:inherit;user-select:none;";
+                const titleBar = document.createElement("div");
+                titleBar.style.cssText = "color:#ffffff;font-size:12px;font-weight:600;margin-bottom:6px;text-align:center;";
+                titleBar.textContent = "速度滑块 (-10 - +10)";
+                container.appendChild(titleBar);
 
-                const labelRow = document.createElement("div");
-                labelRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#858585;margin-bottom:6px;";
-                const minLabel = document.createElement("span");
-                minLabel.textContent = String(MIN);
-                const valBox = document.createElement("span");
-                valBox.style.cssText = "color:#4caf50;font-weight:600;font-size:14px;min-width:52px;text-align:center;background:#2d2d30;border-radius:4px;padding:2px 8px;border:1px solid #3e3e42;";
-                valBox.textContent = "0.0";
-                const maxLabel = document.createElement("span");
-                maxLabel.textContent = "+" + String(MAX);
-                labelRow.appendChild(minLabel);
-                labelRow.appendChild(valBox);
-                labelRow.appendChild(maxLabel);
-                wrap.appendChild(labelRow);
+                const valueRow = document.createElement("div");
+                valueRow.style.cssText = "display:flex;justify-content:center;align-items:baseline;gap:6px;margin-bottom:8px;";
+                const valueLabel = document.createElement("span");
+                valueLabel.style.cssText = "color:#8a93a8;font-size:12px;";
+                valueLabel.textContent = "值";
+                const valueNum = document.createElement("span");
+                valueNum.style.cssText = `color:${COL_YELLOW};font-size:22px;font-weight:700;line-height:1;`;
+                valueNum.textContent = "0";
+                valueRow.appendChild(valueLabel);
+                valueRow.appendChild(valueNum);
+                container.appendChild(valueRow);
 
                 const track = document.createElement("div");
-                track.style.cssText = "position:relative;width:100%;height:28px;background:#2d2d30;border-radius:6px;border:1px solid #3e3e42;cursor:pointer;touch-action:none;";
-
-                const centerMark = document.createElement("div");
-                centerMark.style.cssText = "position:absolute;left:50%;top:0;bottom:0;width:2px;background:#555;transform:translateX(-50%);pointer-events:none;";
-                track.appendChild(centerMark);
+                track.style.cssText = `position:relative;width:100%;height:10px;background:${COL_TRACK_DARK};border-radius:5px;cursor:pointer;touch-action:none;box-shadow:inset 0 1px 2px rgba(0,0,0,0.6);`;
 
                 const fill = document.createElement("div");
-                fill.style.cssText = "position:absolute;top:3px;bottom:3px;border-radius:3px;pointer-events:none;transition:none;";
+                fill.style.cssText = `position:absolute;left:0;top:0;bottom:0;background:${COL_YELLOW};border-radius:5px 0 0 5px;pointer-events:none;`;
                 track.appendChild(fill);
 
                 const handle = document.createElement("div");
-                handle.style.cssText = "position:absolute;top:50%;width:14px;height:22px;background:#007acc;border:2px solid #fff;border-radius:4px;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,0.5);";
+                handle.style.cssText = `position:absolute;top:50%;width:18px;height:18px;background:#ffffff;border:3px solid ${COL_YELLOW};border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,0.5);`;
                 track.appendChild(handle);
 
+                container.appendChild(track);
+
                 const tickRow = document.createElement("div");
-                tickRow.style.cssText = "display:flex;justify-content:space-between;font-size:9px;color:#555;margin-top:4px;padding:0 2px;";
+                tickRow.style.cssText = "display:flex;justify-content:space-between;font-size:9px;color:#8a93a8;margin-top:5px;padding:0 1px;";
                 for (let i = MIN; i <= MAX; i += 5) {
                     const t = document.createElement("span");
                     t.textContent = i;
                     tickRow.appendChild(t);
                 }
+                container.appendChild(tickRow);
 
-                wrap.appendChild(track);
-                wrap.appendChild(tickRow);
+                const badge = document.createElement("div");
+                badge.style.cssText = "position:absolute;top:6px;right:8px;display:flex;align-items:center;gap:3px;font-size:11px;color:#ffffff;";
+                const dot = document.createElement("span");
+                dot.style.cssText = "display:inline-block;width:7px;height:7px;background:#39d353;border-radius:50%;";
+                const star = document.createElement("span");
+                star.textContent = "*";
+                badge.appendChild(dot);
+                badge.appendChild(star);
+                container.appendChild(badge);
 
-                const host = w.inputEl.parentElement?.parentElement || w.inputEl.parentElement;
-                if (host) host.appendChild(wrap);
+                const arcSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                arcSvg.setAttribute("width", "26");
+                arcSvg.setAttribute("height", "60");
+                arcSvg.style.cssText = "position:absolute;right:-6px;top:10px;pointer-events:none;opacity:0.55;";
+                const arcPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                arcPath.setAttribute("d", "M 24 0 Q -6 30 24 60");
+                arcPath.setAttribute("stroke", "#ffffff");
+                arcPath.setAttribute("stroke-width", "1.5");
+                arcPath.setAttribute("fill", "none");
+                arcSvg.appendChild(arcPath);
+                container.appendChild(arcSvg);
+
+                const domW = self.addDOMWidget("qibo_speed_ui", "div", container, {
+                    serialize: false,
+                    getValue: () => String(w.value ?? 0),
+                    setValue: (v) => { w.value = parseFloat(v) || 0; },
+                });
+                domW.options.getHeight = () => 96;
 
                 const valToPct = (v) => (v - MIN) / (MAX - MIN);
                 const pctToVal = (p) => Math.round((MIN + p * (MAX - MIN)) / STEP) * STEP;
@@ -76,18 +122,8 @@ app.registerExtension({
                 const render = (v) => {
                     const pct = valToPct(v);
                     handle.style.left = (pct * 100) + "%";
-                    const centerPct = valToPct(0);
-                    if (v >= 0) {
-                        fill.style.left = (centerPct * 100) + "%";
-                        fill.style.width = ((pct - centerPct) * 100) + "%";
-                        fill.style.background = "linear-gradient(90deg,#2e7d32,#4caf50)";
-                    } else {
-                        fill.style.left = (pct * 100) + "%";
-                        fill.style.width = ((centerPct - pct) * 100) + "%";
-                        fill.style.background = "linear-gradient(90deg,#d13438,#f48789)";
-                    }
-                    valBox.textContent = v.toFixed(1);
-                    valBox.style.color = v > 0 ? "#4caf50" : (v < 0 ? "#f48789" : "#cccccc");
+                    fill.style.width = (pct * 100) + "%";
+                    valueNum.textContent = v.toFixed(1);
                 };
 
                 let dragging = false;
@@ -129,8 +165,10 @@ app.registerExtension({
                     const v = Math.max(MIN, Math.min(MAX, parseFloat(w.value) || 0));
                     render(v);
                 };
-                w.inputEl.addEventListener("input", syncFromWidget);
-                w.inputEl.addEventListener("change", syncFromWidget);
+                if (w.inputEl) {
+                    w.inputEl.addEventListener("input", syncFromWidget);
+                    w.inputEl.addEventListener("change", syncFromWidget);
+                }
                 w.__qiboSyncSlider = syncFromWidget;
                 syncFromWidget();
             };
@@ -138,6 +176,8 @@ app.registerExtension({
             requestAnimationFrame(install);
             setTimeout(install, 50);
             setTimeout(install, 200);
+            setTimeout(install, 500);
+            setTimeout(install, 1000);
 
             const onConfigure = self.onConfigure;
             self.onConfigure = function () {
