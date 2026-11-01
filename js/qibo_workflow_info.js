@@ -1196,7 +1196,7 @@ app.registerExtension({
                 self.setDirtyCanvas(true, true);
             };
 
-            const qiboConfirmDownloadList = (items) => new Promise((resolve) => {
+            const qiboConfirmDownloadList = (items) => new Promise(async (resolve) => {
                 const overlay = document.createElement("div");
                 overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100000;display:flex;align-items:center;justify-content:center;font-family:" + FONT_CSS + ";";
                 const card = document.createElement("div");
