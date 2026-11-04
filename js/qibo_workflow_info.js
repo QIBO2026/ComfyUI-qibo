@@ -1160,6 +1160,12 @@ app.registerExtension({
                     return;
                 }
                 const urls = parseRepoUrls(rawUrls);
+                const _HF_FASTVIDEO_PREFIX = "https://huggingface.co/FastVideo/FastH3-OmniRef-Comfy/resolve/main";
+                for (let i = 0; i < urls.length; i++) {
+                    if (urls[i].includes(_HF_FASTVIDEO_PREFIX)) {
+                        urls[i] = urls[i].replace(/^https:\/\/huggingface\.co\//, "https://hf-mirror.com/");
+                    }
+                }
 
                 let allFiles = [];
                 let repoNames = [];

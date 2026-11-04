@@ -15,6 +15,7 @@ import torch.nn.functional as F
 
 import comfy.model_management
 import comfy.model_patcher
+import comfy.nested_tensor
 import folder_paths
 
 try:
@@ -349,15 +350,22 @@ class QIBOH3LatentUpscaler:
 
     def upscale(self, latent, upscaler_model, scale, force_unload=True):
         samples = latent["samples"]
-        if samples.dim() != 5:
-            raise ValueError(f"仅支持 5D 视频 latent [B,C,T,H,W]，收到 shape={tuple(samples.shape)}（图像 latent 请用 2D 放大节点）")
+        is_nested = isinstance(samples, comfy.nested_tensor.NestedTensor)
+        if is_nested:
+            streams = list(samples.unbind())
+            primary = streams[0]
+        else:
+            streams = None
+            primary = samples
+        if primary.dim() != 5:
+            raise ValueError(f"仅支持 5D 视频 latent [B,C,T,H,W]，收到 shape={tuple(primary.shape)}（图像 latent 请用 2D 放大节点）")
 
         device = comfy.model_management.get_torch_device()
-        B, C, T, h, w = samples.shape
+        B, C, T, h, w = primary.shape
         H = max(int(round(h * scale)), 1)
         W = max(int(round(w * scale)), 1)
         actual_scale = (H / h + W / w) / 2.0
-        logging.info("[QIBO H3 upscaler] input=%s target=%s scale=%.4f model=%s", tuple(samples.shape), (T, H, W), actual_scale, upscaler_model)
+        logging.info("[QIBO H3 upscaler] input=%s target=%s scale=%.4f model=%s nested=%s", tuple(primary.shape), (T, H, W), actual_scale, upscaler_model, is_nested)
 
         patcher = _load_model(upscaler_model, device)
         model = patcher.model
@@ -367,7 +375,7 @@ class QIBOH3LatentUpscaler:
             mean = torch.tensor(LATENTS_MEAN, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
             std = torch.tensor(LATENTS_STD, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
 
-            x = samples.to(device=device, dtype=dtype)
+            x = primary.to(device=device, dtype=dtype)
             with torch.no_grad():
                 x = (x - mean) / std
                 out = model(x, scale=actual_scale, target_size=(T, H, W))
@@ -377,8 +385,14 @@ class QIBOH3LatentUpscaler:
                 comfy.model_management.unload_model_and_clones(patcher, unload_additional_models=False)
                 comfy.model_management.soft_empty_cache()
 
+        if is_nested:
+            new_streams = [out] + streams[1:]
+            out_samples = comfy.nested_tensor.NestedTensor(new_streams)
+        else:
+            out_samples = out
+
         out_latent = dict(latent)
-        out_latent["samples"] = out
+        out_latent["samples"] = out_samples
         return (out_latent,)
 
 

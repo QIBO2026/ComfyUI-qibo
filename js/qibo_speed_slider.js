@@ -114,7 +114,18 @@ app.registerExtension({
                     getValue: () => String(w.value ?? 0),
                     setValue: (v) => { w.value = parseFloat(v) || 0; },
                 });
-                domW.options.getHeight = () => 96;
+                const HEADER_OFFSET = 60;
+                domW.options.getHeight = () => Math.max(96, (self.size?.[1] || 160) - HEADER_OFFSET);
+
+                const origResize = self.onResize || function () {};
+                self.onResize = function () {
+                    const r = origResize.apply(this, arguments);
+                    const h = Math.max(96, (self.size?.[1] || 160) - HEADER_OFFSET);
+                    container.style.height = h + "px";
+                    if (self.graph) self.setDirtyCanvas(true, true);
+                    return r;
+                };
+                container.style.height = Math.max(96, (self.size?.[1] || 160) - HEADER_OFFSET) + "px";
 
                 const valToPct = (v) => (v - MIN) / (MAX - MIN);
                 const pctToVal = (p) => Math.round((MIN + p * (MAX - MIN)) / STEP) * STEP;
