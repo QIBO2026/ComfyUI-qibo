@@ -67,14 +67,40 @@ class QIBOSaveVideoNode:
         proc = subprocess.Popen(
             args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
+
+        def _drain_stderr_and_raise(prefix):
+            try:
+                err = proc.stderr.read() if proc.stderr else b""
+            except Exception:
+                err = b""
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            msg = err.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"{prefix}: {msg if msg else '(no stderr)'} args={args}")
+
         try:
+            if proc.poll() is not None:
+                _drain_stderr_and_raise("ffmpeg exited immediately before any frame written")
             for frame in frames:
-                proc.stdin.write(frame.tobytes())
-            proc.stdin.close()
+                if proc.poll() is not None:
+                    _drain_stderr_and_raise("ffmpeg exited while writing frames")
+                try:
+                    proc.stdin.write(frame.tobytes())
+                except BrokenPipeError:
+                    _drain_stderr_and_raise("ffmpeg pipe broken (BrokenPipeError)")
+            try:
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
             stderr = proc.stderr.read()
             ret = proc.wait()
             if ret != 0:
                 raise RuntimeError(f"ffmpeg video encode failed (code {ret}): {stderr.decode('utf-8', errors='replace')}")
+        except RuntimeError:
+            proc.kill()
+            raise
         except Exception:
             proc.kill()
             raise
