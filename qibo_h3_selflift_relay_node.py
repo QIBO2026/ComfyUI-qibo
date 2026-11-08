@@ -613,16 +613,215 @@ class QBH3SelfLiftPass2:
         return (result,)
 
 
+# --------------------------------------------------------------------------
+# 接力存档：一采结果（relay/preview latent + 条件 token）打包存盘 / 加载离线二采
+# --------------------------------------------------------------------------
+import os
+import time
+
+import folder_paths
+
+_RELAY_DIR_NAME = "qibo_h3_relay"
+
+
+def _relay_dir():
+    base = folder_paths.get_output_directory()
+    d = os.path.join(base, _RELAY_DIR_NAME)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _resolve_relay_path(filename):
+    filename = (filename or "").strip().strip('"').strip("'")
+    if not filename:
+        raise ValueError("QIBO H3 接力存档: 文件名不能为空")
+    if not filename.endswith(".pt"):
+        filename += ".pt"
+    if os.path.isabs(filename):
+        return filename
+    return os.path.join(_relay_dir(), filename)
+
+
+def _split_cpu(latent):
+    """latent dict 的 samples 拆流搬到 CPU（NestedTensor 不可直接 pickle）。"""
+    d = dict(latent)
+    streams, nested = _streams(d["samples"])
+    d["samples"] = _pack([s.detach().to("cpu", copy=True) for s in streams], nested)
+    return d
+
+
+def _cpuize(obj):
+    """递归把 dict/list/tuple 里的 tensor 搬到 CPU（其他对象原样保留）。"""
+    if isinstance(obj, torch.Tensor):
+        return obj.detach().to("cpu", copy=True)
+    if isinstance(obj, dict):
+        return {k: _cpuize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_cpuize(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_cpuize(v) for v in obj)
+    return obj
+
+
+def _restore_device(latent):
+    """加载后的 latent samples 搬回计算设备（保持 dtype 不变）。"""
+    d = dict(latent)
+    device = comfy.model_management.intermediate_device()
+    streams, nested = _streams(d["samples"])
+    d["samples"] = _pack([s.to(device) for s in streams], nested)
+    return d
+
+
+def _cond_to_device(cond):
+    device = comfy.model_management.intermediate_device()
+
+    def rec(x):
+        if isinstance(x, torch.Tensor):
+            return x.to(device)
+        if isinstance(x, dict):
+            return {k: rec(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [rec(v) for v in x]
+        if isinstance(x, tuple):
+            return tuple(rec(v) for v in x)
+        return x
+
+    return rec(cond)
+
+
+class QBH3SelfLiftRelaySave:
+    """接力存档·保存：把一采的接力/预览 latent 与条件 token 打包存为一个 .pt 文件。
+
+    relay_latent 输出为直通（同一个 dict 原样返回），可串在一采与二采之间，
+    不影响原有连线拓扑。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "relay_latent": ("LATENT", {"tooltip": "「QIBO H3 一采」的 relay_latent 输出（直通到输出）"}),
+            "filename": ("STRING", {"default": "qibo_h3_relay",
+                                    "tooltip": "存档文件名（自动存到 output/qibo_h3_relay/ 下，自动补 .pt）"}),
+        }, "optional": {
+            "preview_latent": ("LATENT", {"tooltip": "可选：一采预览 latent，一并存入（供离线直接解码预览）"}),
+            "positive": ("CONDITIONING", {"tooltip": "可选：正向条件 token（与一采同源，二采免重算参考编码）"}),
+            "negative": ("CONDITIONING", {"tooltip": "可选：负向条件 token"}),
+            "include_cond": ("BOOLEAN", {"default": True, "label_on": "保存条件 token：开启", "label_off": "保存条件 token：关闭",
+                                         "tooltip": "开启后条件一并打包；若条件里含不可序列化对象导致保存失败，可关闭只存 latent"}),
+        }}
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("relay_latent(接力)",)
+    FUNCTION = "save"
+    CATEGORY = _CATEGORY
+    OUTPUT_NODE = True
+    DESCRIPTION = (
+        "QIBO H3 接力存档（保存）：把一采的 relay_latent（含剩余 sigma 调度、seed 等接力元数据）、"
+        "预览 latent 和条件 token 一起存成 .pt 文件。二采时用「QIBO H3 接力存档·加载」"
+        "直接读回，前面的参考图/视频/音频编码与一采计算全部不用重跑。"
+    )
+
+    def save(self, relay_latent, filename, preview_latent=None, positive=None,
+             negative=None, include_cond=True):
+        payload = {
+            "format": "qibo_h3_relay_bundle",
+            "version": _RELAY_VERSION,
+            "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "relay": _cpuize(_split_cpu(relay_latent)),
+            "preview": _cpuize(_split_cpu(preview_latent)) if preview_latent is not None else None,
+            "positive": _cpuize(positive) if (include_cond and positive is not None) else None,
+            "negative": _cpuize(negative) if (include_cond and negative is not None) else None,
+        }
+        path = _resolve_relay_path(filename)
+        tmp = path + ".tmp"
+        try:
+            torch.save(payload, tmp)
+            os.replace(tmp, path)
+        except Exception as e:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            raise ValueError(
+                "QIBO H3 接力存档: 保存失败（{}）。若错误与条件序列化有关，"
+                "可把 include_cond 关掉只存 latent（此时离线二采需接回原条件链）。".format(e))
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+        logging.info("[QIBO H3 接力存档] 已保存 %s（%.1f MB，条件=%s）",
+                     path, size_mb, "有" if payload["positive"] is not None else "无")
+        return {"ui": {"text": ["已保存: {}\n大小: {:.1f} MB\n条件token: {}".format(
+            path, size_mb, "有" if payload["positive"] is not None else "无")]},
+            "result": (relay_latent,)}
+
+
+class QBH3SelfLiftRelayLoad:
+    """接力存档·加载：读回存档，输出 relay/preview latent 与条件 token，供离线二采。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "filename": ("STRING", {"default": "qibo_h3_relay",
+                                    "tooltip": "存档文件名（相对 output/qibo_h3_relay/ 或绝对路径，可省略 .pt）"}),
+        }}
+
+    RETURN_TYPES = ("LATENT", "LATENT", "CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("relay_latent(接力)", "preview_latent(预览)", "positive(正向)", "negative(负向)")
+    FUNCTION = "load"
+    CATEGORY = _CATEGORY
+    DESCRIPTION = (
+        "QIBO H3 接力存档（加载）：读回「QIBO H3 接力存档·保存」的 .pt 文件，"
+        "输出接力 latent、预览 latent 和条件 token。接「QIBO H3 二采·高清成片」"
+        "即可离线完成二采——模型加载外，前面全部计算都不用重跑。"
+    )
+
+    def load(self, filename):
+        path = _resolve_relay_path(filename)
+        if not os.path.exists(path):
+            raise ValueError(
+                "QIBO H3 接力存档: 找不到存档文件 {}。文件默认在 ComfyUI 的 "
+                "output/qibo_h3_relay/ 目录下（保存节点会打印完整路径）。".format(path))
+        try:
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+        except TypeError:
+            payload = torch.load(path, map_location="cpu")
+        if not isinstance(payload, dict) or payload.get("format") != "qibo_h3_relay_bundle":
+            raise ValueError("QIBO H3 接力存档: {} 不是本节点保存的存档文件".format(path))
+        if payload.get("version") != _RELAY_VERSION:
+            raise ValueError("QIBO H3 接力存档: 存档版本不兼容（存档 v{}，当前 v{}），请重跑一采重新存档".format(
+                payload.get("version"), _RELAY_VERSION))
+
+        relay = _restore_device(payload["relay"])
+        if _RELAY_KEY not in relay:
+            raise ValueError("QIBO H3 接力存档: 存档里的 relay latent 缺少接力元数据，文件可能损坏")
+        preview = _restore_device(payload["preview"]) if payload.get("preview") is not None else relay
+        positive = payload.get("positive")
+        negative = payload.get("negative")
+        if positive is None or negative is None:
+            raise ValueError(
+                "QIBO H3 接力存档: 该存档未包含条件 token（保存时 include_cond 关了，或保存时没接"
+                " positive/negative）。离线二采需要条件，请在存档工作流里接上并重新保存。")
+        positive = _cond_to_device(positive)
+        negative = _cond_to_device(negative)
+        logging.info("[QIBO H3 接力存档] 已加载 %s（保存于 %s）", path, payload.get("saved_at"))
+        return (relay, preview, positive, negative)
+
+
 NODE_CLASS_MAPPINGS["QIBO_H3_SELFLIFT_PASS1"] = QBH3SelfLiftPass1
 NODE_CLASS_MAPPINGS["QIBO_H3_SELFLIFT_PASS2"] = QBH3SelfLiftPass2
+NODE_CLASS_MAPPINGS["QIBO_H3_SELFLIFT_RELAY_SAVE"] = QBH3SelfLiftRelaySave
+NODE_CLASS_MAPPINGS["QIBO_H3_SELFLIFT_RELAY_LOAD"] = QBH3SelfLiftRelayLoad
 NODE_DISPLAY_NAME_MAPPINGS["QIBO_H3_SELFLIFT_PASS1"] = "QIBO H3 一采·低清接力预览"
 NODE_DISPLAY_NAME_MAPPINGS["QIBO_H3_SELFLIFT_PASS2"] = "QIBO H3 二采·高清成片"
+NODE_DISPLAY_NAME_MAPPINGS["QIBO_H3_SELFLIFT_RELAY_SAVE"] = "QIBO H3 接力存档·保存"
+NODE_DISPLAY_NAME_MAPPINGS["QIBO_H3_SELFLIFT_RELAY_LOAD"] = "QIBO H3 接力存档·加载"
 
 __all__ = [
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
     "QBH3SelfLiftPass1",
     "QBH3SelfLiftPass2",
+    "QBH3SelfLiftRelaySave",
+    "QBH3SelfLiftRelayLoad",
     "relay_stage1",
     "relay_stage2",
 ]
