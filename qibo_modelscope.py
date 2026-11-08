@@ -639,6 +639,28 @@ def _move_one_model(item, dest_dir):
     return {"folder": folder, "filename": filename, "ok": True, "from": src, "to": dest}
 
 
+def _delete_one_model(item, base):
+    folder = (item.get("folder") or "").strip()
+    subpath = (item.get("subpath") or "").strip()
+    filename = (item.get("filename") or "").strip()
+    if not folder or not filename:
+        return {"folder": folder, "filename": filename, "ok": False, "error": "folder/filename 为空"}
+    fparts = [p for p in folder.replace("\\", "/").split("/") if p and p not in (".", "..")]
+    sparts = [p for p in subpath.replace("\\", "/").split("/") if p and p not in (".", "..")]
+    if not fparts:
+        return {"folder": folder, "filename": filename, "ok": False, "error": "非法路径"}
+    src = os.path.realpath(os.path.join(base, *fparts, *sparts, filename))
+    if not src.startswith(base + os.sep):
+        return {"folder": folder, "filename": filename, "ok": False, "error": "非法路径"}
+    if not os.path.isfile(src):
+        return {"folder": folder, "filename": filename, "ok": False, "error": "文件不存在"}
+    try:
+        os.remove(src)
+    except Exception as e:
+        return {"folder": folder, "filename": filename, "ok": False, "error": str(e)}
+    return {"folder": folder, "filename": filename, "ok": True, "deleted": src}
+
+
 def _parse_manifest_text(text, folder_keys):
     """解析清单文本为文件列表。支持:
     - JSON: {"models":[{"model_id","files":[{"name","size","download_url"}]}]}
@@ -1108,58 +1130,6 @@ def register_server_routes():
             t["cancel"] = True
         return web.json_response({"ok": True})
 
-    @routes.post("/qibo/modelscope/delete")
-    async def ms_delete(request):
-        try:
-            payload = await request.json()
-        except Exception:
-            payload = {}
-        models = payload.get("models") or []
-        if isinstance(models, dict):
-            models = [models]
-        if not isinstance(models, list) or len(models) == 0:
-            return web.json_response({"error": "models 为空或格式错误", "results": []})
-
-        def _find_dir_readonly(folder):
-            try:
-                import folder_paths as fp
-                if folder in fp.folder_names_and_paths:
-                    dirs = fp.folder_names_and_paths[folder][0]
-                    for d in dirs:
-                        if os.path.basename(os.path.normpath(d)) == folder and os.path.isdir(d):
-                            return d
-                    for d in dirs:
-                        if os.path.isdir(d):
-                            return d
-            except Exception:
-                pass
-            return None
-
-        def _del_one(item):
-            folder = (item.get("folder") or "").strip()
-            subpath = (item.get("subpath") or "").strip()
-            filename = (item.get("filename") or "").strip()
-            if not folder or not filename:
-                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": "folder/filename 为空"}
-            dest_dir = _find_dir_readonly(folder)
-            if not dest_dir:
-                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": f"未知模型目录: {folder}"}
-            parts = [p for p in subpath.replace("\\", "/").split("/") if p and p not in (".", "..")]
-            dest = os.path.realpath(os.path.join(dest_dir, *parts, filename))
-            base = os.path.realpath(dest_dir)
-            if not dest.startswith(base + os.sep):
-                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": "非法路径"}
-            if not os.path.isfile(dest):
-                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": "文件不存在"}
-            try:
-                os.remove(dest)
-                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": True, "path": dest}
-            except Exception as e:
-                return {"folder": folder, "subpath": subpath, "filename": filename, "ok": False, "error": str(e)}
-
-        results = [_del_one(item) if isinstance(item, dict) else {"filename": "?", "ok": False, "error": "格式错误"} for item in models]
-        ok_count = sum(1 for r in results if r.get("ok"))
-        return web.json_response({"ok": ok_count, "total": len(results), "results": results})
 
     @routes.post("/qibo/modelscope/list_files")
     async def ms_list_files(request):
@@ -1406,6 +1376,27 @@ def register_server_routes():
         results = []
         for item in models:
             results.append(await asyncio.to_thread(_move_one_model, item, dest_dir))
+        ok_count = sum(1 for r in results if r.get("ok"))
+        return web.json_response({"results": results, "ok_count": ok_count})
+
+    @routes.post("/qibo/modelscope/delete")
+    async def ms_delete(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        models = payload.get("models") or []
+        if isinstance(models, dict):
+            models = [models]
+        if not isinstance(models, list) or len(models) == 0:
+            return web.json_response({"error": "models 为空或格式错误", "results": []})
+        base = _models_base_dir()
+        if not base:
+            return web.json_response({"error": "未找到 models 目录", "results": []})
+        base = os.path.realpath(base)
+        results = []
+        for item in models:
+            results.append(await asyncio.to_thread(_delete_one_model, item, base))
         ok_count = sum(1 for r in results if r.get("ok"))
         return web.json_response({"results": results, "ok_count": ok_count})
 

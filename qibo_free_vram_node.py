@@ -70,8 +70,8 @@ class QIBOFreeVRAMNode:
             "required": {
                 "gc_collect": ("BOOLEAN", {"default": True,
                                            "tooltip": "调用 gc.collect() 回收 Python 循环引用"}),
-                "unload_models": ("BOOLEAN", {"default": False,
-                                              "tooltip": "卸载所有已加载模型（下次需重载）"}),
+                "unload_models": ("BOOLEAN", {"default": True,
+                                              "tooltip": "卸载所有已加载模型（如 TE/VAE），让下游 UNet 完全驻留显存"}),
                 "empty_cache": ("BOOLEAN", {"default": True,
                                             "tooltip": "调用 soft_empty_cache 清各后端缓存（CUDA/MPS/XPU/NPU/MLU）"}),
                 "aggressive": ("BOOLEAN", {"default": False,

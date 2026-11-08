@@ -87,6 +87,11 @@ function showMoveDialog(node) {
     btnRow.style.cssText = `padding:10px 14px;border-top:1px solid ${COL_BORDER};display:flex;gap:10px;justify-content:flex-end;align-items:center;`;
     const statusSpan = document.createElement("span");
     statusSpan.style.cssText = `flex:1;color:${COL_DIM};max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+    const totalSpan = document.createElement("span");
+    totalSpan.style.cssText = `color:#4ec9b0;font-size:12px;white-space:nowrap;`;
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "删除选中";
+    deleteBtn.style.cssText = "padding:6px 16px;border-radius:4px;border:1px solid #a94442;background:#c9302c;color:#fff;cursor:pointer;font-size:13px;";
     const cancelBtn = document.createElement("button");
     cancelBtn.textContent = "关闭";
     cancelBtn.style.cssText = `padding:6px 16px;border-radius:4px;border:1px solid ${COL_BORDER};background:${COL_BG};color:${COL_FG};cursor:pointer;font-size:13px;`;
@@ -94,6 +99,8 @@ function showMoveDialog(node) {
     moveBtn.textContent = "移动选中";
     moveBtn.style.cssText = "padding:6px 16px;border-radius:4px;border:1px solid #2e6da4;background:#337ab7;color:#fff;cursor:pointer;font-size:13px;";
     btnRow.appendChild(statusSpan);
+    btnRow.appendChild(totalSpan);
+    btnRow.appendChild(deleteBtn);
     btnRow.appendChild(cancelBtn);
     btnRow.appendChild(moveBtn);
     dlg.appendChild(btnRow);
@@ -106,6 +113,35 @@ function showMoveDialog(node) {
     cancelBtn.onclick = close;
     refreshBtn.onclick = () => { if (!busy) loadModels(); };
     overlay.addEventListener("mousedown", (ev) => { if (ev.target === overlay && !busy) close(); });
+
+    const confirmDelete = (count) => {
+        return new Promise((resolve) => {
+            const cov = document.createElement("div");
+            cov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100002;display:flex;align-items:center;justify-content:center;font-family:" + FONT_CSS + ";";
+            const cbox = document.createElement("div");
+            cbox.style.cssText = `background:${COL_BG};color:${COL_FG};border:1px solid #a94442;border-radius:8px;min-width:320px;max-width:520px;padding:18px 20px;font-size:13px;box-shadow:0 8px 32px rgba(0,0,0,0.5);`;
+            const ctext = document.createElement("div");
+            ctext.textContent = `⚠ 确定删除选中的 ${count} 个模型文件吗？此操作不可恢复！`;
+            ctext.style.cssText = "line-height:1.5;";
+            const crow = document.createElement("div");
+            crow.style.cssText = "display:flex;gap:10px;justify-content:flex-end;margin-top:16px;";
+            const cNo = document.createElement("button");
+            cNo.textContent = "取消";
+            cNo.style.cssText = `padding:6px 16px;border-radius:4px;border:1px solid ${COL_BORDER};background:${COL_BG};color:${COL_FG};cursor:pointer;font-size:13px;`;
+            const cYes = document.createElement("button");
+            cYes.textContent = "确定删除";
+            cYes.style.cssText = "padding:6px 16px;border-radius:4px;border:1px solid #a94442;background:#c9302c;color:#fff;cursor:pointer;font-size:13px;";
+            const done = (v) => { cov.remove(); resolve(v); };
+            cNo.onclick = () => done(false);
+            cYes.onclick = () => done(true);
+            crow.appendChild(cNo);
+            crow.appendChild(cYes);
+            cbox.appendChild(ctext);
+            cbox.appendChild(crow);
+            cov.appendChild(cbox);
+            document.body.appendChild(cov);
+        });
+    };
 
     let items = [];
 
@@ -295,6 +331,7 @@ function showMoveDialog(node) {
         loading.textContent = "扫描 models 目录中...";
         listEl.appendChild(loading);
         hintSpan.textContent = "";
+        totalSpan.textContent = "";
         try {
             const res = await fetchLocalModels();
             if (res.__error) {
@@ -308,9 +345,66 @@ function showMoveDialog(node) {
             const models = res.models || [];
             renderList(models);
             hintSpan.textContent = `共 ${models.length} 个模型`;
+            const totalBytes = models.reduce((s, m) => s + (m.size || 0), 0);
+            totalSpan.textContent = `💾 总占用 ${fmtSize(totalBytes)}`;
         } catch (e) {
             loading.textContent = "❌ " + e;
         }
+    };
+
+    deleteBtn.onclick = async () => {
+        if (busy) return;
+        const picked = items.filter((it) => it.cb.checked);
+        if (picked.length === 0) {
+            statusSpan.textContent = "⚠ 请先勾选要删除的模型";
+            return;
+        }
+        const ok = await confirmDelete(picked.length);
+        if (!ok) return;
+        busy = true;
+        deleteBtn.disabled = true;
+        moveBtn.disabled = true;
+        refreshBtn.disabled = true;
+        cancelBtn.disabled = true;
+        selAllCb.disabled = true;
+        for (const it of items) it.cb.disabled = true;
+        deleteBtn.textContent = "删除中...";
+        let res;
+        try {
+            const body = {
+                models: picked.map((it) => ({ folder: it.m.folder, subpath: it.m.subpath || "", filename: it.m.name })),
+            };
+            const r = await fetch("/qibo/modelscope/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            const raw = await r.text();
+            try { res = JSON.parse(raw); } catch (e) { res = { __error: `HTTP ${r.status}: ${raw.slice(0, 200)}` }; }
+        } catch (e) {
+            res = { __error: String(e) };
+        }
+        busy = false;
+        deleteBtn.disabled = false;
+        moveBtn.disabled = false;
+        refreshBtn.disabled = false;
+        cancelBtn.disabled = false;
+        selAllCb.disabled = false;
+        deleteBtn.textContent = "删除选中";
+        if (res.__error || res.error) {
+            statusSpan.textContent = `❌ 删除失败: ${res.__error || res.error}`;
+            console.warn("[QIBO.ModelMove]", res);
+            return;
+        }
+        const results = res.results || [];
+        const okCount = res.ok_count || results.filter((x) => x.ok).length;
+        for (const rr of results) {
+            if (!rr.ok) console.warn(`[QIBO.ModelMove] ❌ 删除 ${rr.folder}/${rr.filename}: ${rr.error}`);
+        }
+        statusSpan.textContent = okCount === picked.length
+            ? `已删除 ${okCount} 个模型`
+            : `删除完成: ${okCount}/${picked.length} 成功（详情见控制台）`;
+        setTimeout(() => { if (!busy) loadModels(); }, 600);
     };
 
     moveBtn.onclick = async () => {
@@ -323,6 +417,7 @@ function showMoveDialog(node) {
         }
         busy = true;
         moveBtn.disabled = true;
+        deleteBtn.disabled = true;
         refreshBtn.disabled = true;
         cancelBtn.disabled = true;
         selAllCb.disabled = true;
@@ -367,6 +462,7 @@ function showMoveDialog(node) {
         } finally {
             busy = false;
             moveBtn.disabled = false;
+            deleteBtn.disabled = false;
             refreshBtn.disabled = false;
             cancelBtn.disabled = false;
             selAllCb.disabled = false;
