@@ -621,7 +621,7 @@ import time
 
 import folder_paths
 
-_RELAY_DIR_NAME = "qibo_h3_relay"
+_RELAY_DIR_NAME = "qibo_h3"
 
 
 def _relay_dir():
@@ -629,6 +629,14 @@ def _relay_dir():
     d = os.path.join(base, _RELAY_DIR_NAME)
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def _archive_names():
+    d = _relay_dir()
+    try:
+        return sorted(fn for fn in os.listdir(d) if fn.endswith(".pt"))
+    except OSError:
+        return []
 
 
 def _resolve_relay_path(filename):
@@ -700,9 +708,11 @@ class QBH3SelfLiftRelaySave:
     def INPUT_TYPES(cls):
         return {"required": {
             "relay_latent": ("LATENT", {"tooltip": "「QIBO H3 一采」的 relay_latent 输出（直通到输出）"}),
-            "filename": ("STRING", {"default": "qibo_h3_relay",
-                                    "tooltip": "存档文件名（自动存到 output/qibo_h3_relay/ 下，自动补 .pt）"}),
+            "filename": ("STRING", {"default": "qibo_h3",
+                                    "tooltip": "手动命名模式下的存档文件名（自动补 .pt）。批量自动命名开启时忽略"}),
         }, "optional": {
+            "auto_name": ("BOOLEAN", {"default": True, "label_on": "批量自动命名：开启", "label_off": "批量自动命名：关闭",
+                                      "tooltip": "开启：每次执行按时间戳生成新存档（批量存档互不覆盖）；关闭：用 filename 覆盖保存"}),
             "preview_latent": ("LATENT", {"tooltip": "可选：一采预览 latent，一并存入（供离线直接解码预览）"}),
             "positive": ("CONDITIONING", {"tooltip": "可选：正向条件 token（与一采同源，二采免重算参考编码）"}),
             "negative": ("CONDITIONING", {"tooltip": "可选：负向条件 token"}),
@@ -721,8 +731,10 @@ class QBH3SelfLiftRelaySave:
         "直接读回，前面的参考图/视频/音频编码与一采计算全部不用重跑。"
     )
 
-    def save(self, relay_latent, filename, preview_latent=None, positive=None,
-             negative=None, include_cond=True):
+    def save(self, relay_latent, filename, auto_name=True, preview_latent=None,
+             positive=None, negative=None, include_cond=True):
+        if auto_name:
+            filename = time.strftime("auto_%Y%m%d_%H%M%S")
         payload = {
             "format": "qibo_h3_relay_bundle",
             "version": _RELAY_VERSION,
@@ -733,6 +745,12 @@ class QBH3SelfLiftRelaySave:
             "negative": _cpuize(negative) if (include_cond and negative is not None) else None,
         }
         path = _resolve_relay_path(filename)
+        if auto_name:
+            stem, ext = os.path.splitext(path)
+            n = 1
+            while os.path.exists(path):
+                path = "{}_{}{}".format(stem, n, ext)
+                n += 1
         tmp = path + ".tmp"
         try:
             torch.save(payload, tmp)
@@ -757,11 +775,16 @@ class QBH3SelfLiftRelaySave:
 class QBH3SelfLiftRelayLoad:
     """接力存档·加载：读回存档，输出 relay/preview latent 与条件 token，供离线二采。"""
 
+    _EMPTY = "(无存档-先在存档工作流跑一采)"
+
     @classmethod
     def INPUT_TYPES(cls):
+        names = _archive_names()
+        if not names:
+            names = [cls._EMPTY]
         return {"required": {
-            "filename": ("STRING", {"default": "qibo_h3_relay",
-                                    "tooltip": "存档文件名（相对 output/qibo_h3_relay/ 或绝对路径，可省略 .pt）"}),
+            "filename": (names, {"tooltip": "选择存档（output/qibo_h3/ 目录下的 .pt）。"
+                                            "列表在页面刷新/按 R 后更新；也可用「QIBO H3 存档管理」节点弹窗查看/删除/直接选用"}),
         }}
 
     RETURN_TYPES = ("LATENT", "LATENT", "CONDITIONING", "CONDITIONING")
@@ -769,17 +792,21 @@ class QBH3SelfLiftRelayLoad:
     FUNCTION = "load"
     CATEGORY = _CATEGORY
     DESCRIPTION = (
-        "QIBO H3 接力存档（加载）：读回「QIBO H3 接力存档·保存」的 .pt 文件，"
+        "QIBO H3 接力存档（加载）：从下拉列表选择一采生成的存档（output/qibo_h3/），"
         "输出接力 latent、预览 latent 和条件 token。接「QIBO H3 二采·高清成片」"
         "即可离线完成二采——模型加载外，前面全部计算都不用重跑。"
     )
 
     def load(self, filename):
+        if filename.startswith("("):
+            raise ValueError(
+                "QIBO H3 接力存档: 当前还没有可选存档。请先在《接力二采_存档》工作流跑完一采，"
+                "存档会自动保存到 ComfyUI 的 output/qibo_h3/ 目录，然后按 R 刷新列表。")
         path = _resolve_relay_path(filename)
         if not os.path.exists(path):
             raise ValueError(
-                "QIBO H3 接力存档: 找不到存档文件 {}。文件默认在 ComfyUI 的 "
-                "output/qibo_h3_relay/ 目录下（保存节点会打印完整路径）。".format(path))
+                "QIBO H3 接力存档: 找不到存档文件 {}。存档默认在 ComfyUI 的 "
+                "output/qibo_h3/ 目录下（保存节点会打印完整路径；列表按 R 刷新）。".format(path))
         try:
             payload = torch.load(path, map_location="cpu", weights_only=False)
         except TypeError:
@@ -806,14 +833,41 @@ class QBH3SelfLiftRelayLoad:
         return (relay, preview, positive, negative)
 
 
+class QBH3ArchiveManager:
+    """存档管理（纯 UI 节点）：点节点上的按钮弹出存档管理面板。
+
+    面板功能由 js/qibo_h3_archive_manager.js 实现：
+    列出 output/qibo_h3/ 全部存档（名字/大小/时间）、勾选批量删除、
+    一键把选中存档设为当前图里「QIBO H3 接力存档·加载」的二采来源。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {}}
+
+    RETURN_TYPES = ()
+    FUNCTION = "noop"
+    CATEGORY = _CATEGORY
+    OUTPUT_NODE = True
+    DESCRIPTION = (
+        "QIBO H3 存档管理器：点按钮打开管理面板——查看/删除存档（支持多选）、"
+        "选择哪个存档用于二采。存档目录：output/qibo_h3/。"
+    )
+
+    def noop(self):
+        return {"ui": {"text": ["点节点上的「存档管理」按钮打开面板"]}, "result": []}
+
+
 NODE_CLASS_MAPPINGS["QIBO_H3_SELFLIFT_PASS1"] = QBH3SelfLiftPass1
 NODE_CLASS_MAPPINGS["QIBO_H3_SELFLIFT_PASS2"] = QBH3SelfLiftPass2
 NODE_CLASS_MAPPINGS["QIBO_H3_SELFLIFT_RELAY_SAVE"] = QBH3SelfLiftRelaySave
 NODE_CLASS_MAPPINGS["QIBO_H3_SELFLIFT_RELAY_LOAD"] = QBH3SelfLiftRelayLoad
+NODE_CLASS_MAPPINGS["QIBO_H3_ARCHIVE_MANAGER"] = QBH3ArchiveManager
 NODE_DISPLAY_NAME_MAPPINGS["QIBO_H3_SELFLIFT_PASS1"] = "QIBO H3 一采·低清接力预览"
 NODE_DISPLAY_NAME_MAPPINGS["QIBO_H3_SELFLIFT_PASS2"] = "QIBO H3 二采·高清成片"
 NODE_DISPLAY_NAME_MAPPINGS["QIBO_H3_SELFLIFT_RELAY_SAVE"] = "QIBO H3 接力存档·保存"
 NODE_DISPLAY_NAME_MAPPINGS["QIBO_H3_SELFLIFT_RELAY_LOAD"] = "QIBO H3 接力存档·加载"
+NODE_DISPLAY_NAME_MAPPINGS["QIBO_H3_ARCHIVE_MANAGER"] = "QIBO H3 存档管理"
 
 __all__ = [
     "NODE_CLASS_MAPPINGS",
@@ -822,6 +876,7 @@ __all__ = [
     "QBH3SelfLiftPass2",
     "QBH3SelfLiftRelaySave",
     "QBH3SelfLiftRelayLoad",
+    "QBH3ArchiveManager",
     "relay_stage1",
     "relay_stage2",
 ]

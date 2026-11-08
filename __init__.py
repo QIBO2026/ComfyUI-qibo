@@ -56,6 +56,13 @@ try:
 except Exception as e:
     print(f"⚠️ QIBO 魔搭路由注册失败: {e}")
 
+try:
+    from .qibo_h3_archive_api import register_server_routes as register_h3_archive_routes
+    register_h3_archive_routes()
+    print("✅ QIBO H3 接力存档管理路由已注册")
+except Exception as e:
+    print(f"⚠️ QIBO H3 接力存档管理路由注册失败: {e}")
+
 
 
 
