@@ -36,7 +36,7 @@ _download_lock = threading.Lock()
 
 
 def _get_comfyui_root():
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _download_thread(url, dest_path, task_id):
