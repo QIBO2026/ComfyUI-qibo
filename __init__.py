@@ -34,6 +34,7 @@ from .qibo_body_ratio import NODE_CLASS_MAPPINGS as BODY_RATIO_MAPPINGS, NODE_DI
 from .qibo_seg_video_node import NODE_CLASS_MAPPINGS as SEG_VIDEO_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as SEG_VIDEO_DISPLAY_MAPPINGS
 from .qibo_h3_selflift_relay_node import NODE_CLASS_MAPPINGS as H3_SELF_LIFT_RELAY_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as H3_SELF_LIFT_RELAY_DISPLAY_MAPPINGS
 from .qibo_goohai_note_node import NODE_CLASS_MAPPINGS as GOOHAI_NOTE_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as GOOHAI_NOTE_DISPLAY_MAPPINGS
+from .qibo_download_extract_node import NODE_CLASS_MAPPINGS as DOWNLOAD_EXTRACT_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as DOWNLOAD_EXTRACT_DISPLAY_MAPPINGS
 
 
 try:
@@ -63,6 +64,13 @@ try:
     print("✅ QIBO H3 接力存档管理路由已注册")
 except Exception as e:
     print(f"⚠️ QIBO H3 接力存档管理路由注册失败: {e}")
+
+try:
+    from .qibo_download_extract_node import register_server_routes as register_download_extract_routes
+    register_download_extract_routes()
+    print("✅ QIBO 下载解压路由已注册")
+except Exception as e:
+    print(f"⚠️ QIBO 下载解压路由注册失败: {e}")
 
 
 
@@ -104,6 +112,7 @@ NODE_CLASS_MAPPINGS = {
     **SEG_VIDEO_MAPPINGS,
     **H3_SELF_LIFT_RELAY_MAPPINGS,
     **GOOHAI_NOTE_MAPPINGS,
+    **DOWNLOAD_EXTRACT_MAPPINGS,
 
 }
 
@@ -143,6 +152,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **SEG_VIDEO_DISPLAY_MAPPINGS,
     **H3_SELF_LIFT_RELAY_DISPLAY_MAPPINGS,
     **GOOHAI_NOTE_DISPLAY_MAPPINGS,
+    **DOWNLOAD_EXTRACT_DISPLAY_MAPPINGS,
 
 }
 
