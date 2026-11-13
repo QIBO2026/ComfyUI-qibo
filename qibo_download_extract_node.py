@@ -71,12 +71,25 @@ def _download_thread(url, dest_path, task_id):
 
 
 def _find_comfyui_cluster_dir(root_dir):
-    """递归查找包含多个 ComfyUI 名称子目录的目录，返回该目录路径或 None"""
+    """递归查找包含 >=2 个 ComfyUI_ 开头子目录的目录，返回该目录路径或 None"""
     for dirpath, dirnames, filenames in os.walk(root_dir):
-        comfyui_dirs = [d for d in dirnames if "ComfyUI" in d or "comfyui" in d]
+        comfyui_dirs = [d for d in dirnames if d.startswith("ComfyUI") or d.startswith("comfyui")]
         if len(comfyui_dirs) >= 2:
             return dirpath
     return None
+
+
+def _strip_wrapper_dir(root_dir):
+    """如果 root_dir 只有一个子目录，进入它；重复直到有多个子项或无子目录"""
+    while True:
+        items = os.listdir(root_dir)
+        if len(items) == 1:
+            sole = os.path.join(root_dir, items[0])
+            if os.path.isdir(sole):
+                root_dir = sole
+                continue
+        break
+    return root_dir
 
 
 def _move_contents(src_dir, dest_dir, overwrite=False):
@@ -202,17 +215,13 @@ def register_server_routes():
                 result = _move_contents(cluster_dir, custom_nodes_dir, overwrite)
                 action_desc = f"从 {os.path.relpath(cluster_dir, temp_extract_dir)} 移动"
             else:
-                items = os.listdir(temp_extract_dir)
-                if len(items) == 1:
-                    sole = os.path.join(temp_extract_dir, items[0])
-                    if os.path.isdir(sole) and items[0] == "custom_nodes":
-                        result = _move_contents(sole, custom_nodes_dir, overwrite)
-                        action_desc = "从 custom_nodes 目录提取内容"
-                    else:
-                        result = _move_contents(temp_extract_dir, custom_nodes_dir, overwrite)
-                        action_desc = "直接移动"
+                stripped_dir = _strip_wrapper_dir(temp_extract_dir)
+                cluster_dir2 = _find_comfyui_cluster_dir(stripped_dir)
+                if cluster_dir2:
+                    result = _move_contents(cluster_dir2, custom_nodes_dir, overwrite)
+                    action_desc = f"从 {os.path.relpath(cluster_dir2, temp_extract_dir)} 移动"
                 else:
-                    result = _move_contents(temp_extract_dir, custom_nodes_dir, overwrite)
+                    result = _move_contents(stripped_dir, custom_nodes_dir, overwrite)
                     action_desc = "直接移动"
 
             shutil.rmtree(temp_extract_dir)
