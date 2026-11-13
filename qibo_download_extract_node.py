@@ -145,7 +145,7 @@ class QIBODownloadExtractNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "url": ("STRING", {"default": "", "multiline": False}),
+                "url": ("STRING", {"default": "https://modelscope.cn/datasets/lanren/fahuo/resolve/master/custom_nodes_backup.tar.gz", "multiline": False}),
                 "overwrite": ("BOOLEAN", {"default": False}),
             },
         }
