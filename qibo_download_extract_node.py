@@ -192,30 +192,45 @@ def register_server_routes():
                 shutil.rmtree(temp_extract_dir)
                 return web.json_response({"error": f"不支持的格式: {filepath}"}, status=400)
 
-            cluster_dir = _find_comfyui_cluster_dir(temp_extract_dir)
+            comfyui_dirs = _find_comfyui_dirs(temp_extract_dir)
 
-            if cluster_dir:
-                result = _move_contents(cluster_dir, custom_nodes_dir, overwrite)
-                action_desc = f"从 {os.path.relpath(cluster_dir, temp_extract_dir)} 移动"
+            moved = []
+            skipped = []
+
+            if comfyui_dirs:
+                for d in comfyui_dirs:
+                    status, name = _move_single_item(d, custom_nodes_dir, overwrite)
+                    if status == "moved":
+                        moved.append(name)
+                    else:
+                        skipped.append(name)
+                action_desc = f"找到 {len(comfyui_dirs)} 个 ComfyUI 目录"
             else:
-                stripped_dir = _strip_wrapper_dir(temp_extract_dir)
-                cluster_dir2 = _find_comfyui_cluster_dir(stripped_dir)
-                if cluster_dir2:
-                    result = _move_contents(cluster_dir2, custom_nodes_dir, overwrite)
-                    action_desc = f"从 {os.path.relpath(cluster_dir2, temp_extract_dir)} 移动"
-                else:
-                    result = _move_contents(stripped_dir, custom_nodes_dir, overwrite)
-                    action_desc = "直接移动"
+                src_dir = temp_extract_dir
+                while True:
+                    items = os.listdir(src_dir)
+                    if len(items) == 1 and os.path.isdir(os.path.join(src_dir, items[0])):
+                        src_dir = os.path.join(src_dir, items[0])
+                        continue
+                    break
+                for item in os.listdir(src_dir):
+                    src_item = os.path.join(src_dir, item)
+                    status, name = _move_single_item(src_item, custom_nodes_dir, overwrite)
+                    if status == "moved":
+                        moved.append(name)
+                    else:
+                        skipped.append(name)
+                action_desc = "直接移动"
 
             shutil.rmtree(temp_extract_dir)
 
             return web.json_response({
                 "success": True,
                 "action": action_desc,
-                "moved_count": len(result["moved"]),
-                "skipped_count": len(result["skipped"]),
-                "moved": result["moved"][:50],
-                "skipped": result["skipped"][:50],
+                "moved_count": len(moved),
+                "skipped_count": len(skipped),
+                "moved": moved[:50],
+                "skipped": skipped[:50],
             })
         except Exception as e:
             if os.path.exists(temp_extract_dir):
