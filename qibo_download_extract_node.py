@@ -70,46 +70,29 @@ def _download_thread(url, dest_path, task_id):
             _download_progress[task_id]["error"] = str(e)
 
 
-def _find_comfyui_cluster_dir(root_dir):
-    """递归查找包含 >=2 个 ComfyUI_ 开头子目录的目录，返回该目录路径或 None"""
+def _find_comfyui_dirs(root_dir):
+    """递归查找所有 ComfyUI 开头的目录（ComfyUI-xxx 或 ComfyUI_xxx），返回完整路径列表"""
+    result = []
     for dirpath, dirnames, filenames in os.walk(root_dir):
-        comfyui_dirs = [d for d in dirnames if d.startswith("ComfyUI") or d.startswith("comfyui")]
-        if len(comfyui_dirs) >= 2:
-            return dirpath
-    return None
+        for d in dirnames:
+            if d.startswith("ComfyUI") or d.startswith("comfyui"):
+                result.append(os.path.join(dirpath, d))
+    return result
 
 
-def _strip_wrapper_dir(root_dir):
-    """如果 root_dir 只有一个子目录，进入它；重复直到有多个子项或无子目录"""
-    while True:
-        items = os.listdir(root_dir)
-        if len(items) == 1:
-            sole = os.path.join(root_dir, items[0])
-            if os.path.isdir(sole):
-                root_dir = sole
-                continue
-        break
-    return root_dir
-
-
-def _move_contents(src_dir, dest_dir, overwrite=False):
-    """将 src_dir 下的所有内容移动到 dest_dir"""
-    moved = []
-    skipped = []
-    for item in os.listdir(src_dir):
-        src_item = os.path.join(src_dir, item)
-        dest_item = os.path.join(dest_dir, item)
-        if os.path.exists(dest_item) and not overwrite:
-            skipped.append(item)
-            continue
-        if os.path.exists(dest_item) and overwrite:
-            if os.path.isdir(dest_item):
-                shutil.rmtree(dest_item)
-            else:
-                os.remove(dest_item)
-        shutil.move(src_item, dest_item)
-        moved.append(item)
-    return {"moved": moved, "skipped": skipped}
+def _move_single_item(src_path, dest_dir, overwrite=False):
+    """将单个目录/文件移动到 dest_dir，返回 moved 或 skipped"""
+    name = os.path.basename(src_path)
+    dest_path = os.path.join(dest_dir, name)
+    if os.path.exists(dest_path) and not overwrite:
+        return "skipped", name
+    if os.path.exists(dest_path) and overwrite:
+        if os.path.isdir(dest_path):
+            shutil.rmtree(dest_path)
+        else:
+            os.remove(dest_path)
+    shutil.move(src_path, dest_path)
+    return "moved", name
 
 
 def register_server_routes():
