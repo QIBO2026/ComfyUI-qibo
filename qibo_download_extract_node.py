@@ -202,8 +202,18 @@ def register_server_routes():
                 result = _move_contents(cluster_dir, custom_nodes_dir, overwrite)
                 action_desc = f"从 {os.path.relpath(cluster_dir, temp_extract_dir)} 移动"
             else:
-                result = _move_contents(temp_extract_dir, custom_nodes_dir, overwrite)
-                action_desc = "直接移动"
+                items = os.listdir(temp_extract_dir)
+                if len(items) == 1:
+                    sole = os.path.join(temp_extract_dir, items[0])
+                    if os.path.isdir(sole) and items[0] == "custom_nodes":
+                        result = _move_contents(sole, custom_nodes_dir, overwrite)
+                        action_desc = "从 custom_nodes 目录提取内容"
+                    else:
+                        result = _move_contents(temp_extract_dir, custom_nodes_dir, overwrite)
+                        action_desc = "直接移动"
+                else:
+                    result = _move_contents(temp_extract_dir, custom_nodes_dir, overwrite)
+                    action_desc = "直接移动"
 
             shutil.rmtree(temp_extract_dir)
 
