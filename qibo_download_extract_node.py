@@ -222,7 +222,10 @@ def register_server_routes():
                         skipped.append(name)
                 action_desc = "直接移动"
 
-            shutil.rmtree(temp_extract_dir)
+            try:
+                shutil.rmtree(temp_extract_dir)
+            except Exception:
+                pass
 
             return web.json_response({
                 "success": True,
@@ -233,8 +236,11 @@ def register_server_routes():
                 "skipped": skipped[:50],
             })
         except Exception as e:
-            if os.path.exists(temp_extract_dir):
-                shutil.rmtree(temp_extract_dir)
+            try:
+                if os.path.exists(temp_extract_dir):
+                    shutil.rmtree(temp_extract_dir)
+            except Exception:
+                pass
             return web.json_response({"error": str(e)}, status=500)
 
 
@@ -245,7 +251,7 @@ class QIBODownloadExtractNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "url": ("STRING", {"default": "https://modelscope.cn/datasets/lanren/fahuo/resolve/master/custom_nodes_backup.tar.gz", "multiline": False}),
+                "url": ("STRING", {"default": "https://modelscope.cn/datasets/lanren/fahuo/resolve/master/custom_nodes.zip", "multiline": False}),
                 "overwrite": ("BOOLEAN", {"default": False}),
             },
         }
