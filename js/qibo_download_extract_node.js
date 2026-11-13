@@ -101,12 +101,7 @@ app.registerExtension({
             });
 
             const exBtn = self.addWidget("button", "解压到 custom_nodes", null, async () => {
-                if (!downloadedFilename) {
-                    exBtn.name = "请先下载文件";
-                    self.setDirtyCanvas(true, true);
-                    setTimeout(() => { exBtn.name = "解压到 custom_nodes"; self.setDirtyCanvas(true, true); }, 2000);
-                    return;
-                }
+
                 const overwrite = overwriteWidget?.value || false;
                 exBtn.name = "解压中...";
                 self.setDirtyCanvas(true, true);

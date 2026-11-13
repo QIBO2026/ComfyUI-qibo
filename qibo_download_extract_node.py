@@ -157,10 +157,23 @@ def register_server_routes():
             filename = data.get("filename", "").strip()
             overwrite = data.get("overwrite", False)
 
-            if not filename:
-                return web.json_response({"error": "缺少文件名参数"}, status=400)
-
             comfyui_root = _get_comfyui_root()
+
+            if not filename:
+                for candidate in ["custom_nodes.zip", "custom_nodes_backup.tar.gz",
+                                  "custom_nodes_backup.zip", "custom_nodes.tar.gz"]:
+                    candidate_path = os.path.join(comfyui_root, candidate)
+                    if os.path.exists(candidate_path):
+                        filename = candidate
+                        break
+                if not filename:
+                    for f in os.listdir(comfyui_root):
+                        if f.endswith((".zip", ".tar.gz", ".tgz", ".tar.bz2", ".tar")):
+                            filename = f
+                            break
+                if not filename:
+                    return web.json_response({"error": "未找到压缩文件，请先下载"}, status=404)
+
             filepath = os.path.join(comfyui_root, filename)
 
             if not os.path.exists(filepath):
