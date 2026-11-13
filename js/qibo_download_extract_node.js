@@ -2,6 +2,13 @@ import { app } from "/scripts/app.js";
 
 const NODE_TYPE = "QIBODownloadExtractNode";
 
+function fmtSize(bytes) {
+    if (!bytes) return "0B";
+    if (bytes < 1024) return bytes + "B";
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + "KB";
+    return (bytes / 1048576).toFixed(1) + "MB";
+}
+
 app.registerExtension({
     name: "QIBO.DownloadExtract",
     async beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
@@ -13,11 +20,13 @@ app.registerExtension({
             const self = this;
 
             let downloadedFilename = "";
+            let downloading = false;
 
             const urlWidget = self.widgets?.find((w) => w.name === "url");
             const overwriteWidget = self.widgets?.find((w) => w.name === "overwrite");
 
             const dlBtn = self.addWidget("button", "下载文件", null, async () => {
+                if (downloading) return;
                 const url = urlWidget?.value?.trim() || "";
                 if (!url) {
                     dlBtn.name = "请先输入网址";
@@ -25,6 +34,7 @@ app.registerExtension({
                     setTimeout(() => { dlBtn.name = "下载文件"; self.setDirtyCanvas(true, true); }, 2000);
                     return;
                 }
+                downloading = true;
                 dlBtn.name = "下载中...";
                 self.setDirtyCanvas(true, true);
                 try {
@@ -37,15 +47,56 @@ app.registerExtension({
                     if (j.error) {
                         dlBtn.name = "下载失败: " + j.error.slice(0, 40);
                         self.setDirtyCanvas(true, true);
+                        downloading = false;
                         return;
                     }
+                    const taskId = j.task_id;
                     downloadedFilename = j.filename;
-                    const sizeKB = j.size ? (j.size / 1024).toFixed(1) + "KB" : "";
-                    dlBtn.name = "已下载: " + j.filename + (sizeKB ? " (" + sizeKB + ")" : "");
-                    self.setDirtyCanvas(true, true);
+
+                    const pollProgress = async () => {
+                        try {
+                            const pr = await fetch("/qibo/download_progress", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ task_id: taskId }),
+                            });
+                            const pj = await pr.json();
+                            if (pj.error) {
+                                dlBtn.name = "下载失败: " + pj.error.slice(0, 40);
+                                self.setDirtyCanvas(true, true);
+                                downloading = false;
+                                return;
+                            }
+                            if (pj.status === "done") {
+                                const sizeStr = pj.size ? fmtSize(pj.size) : "";
+                                dlBtn.name = "已下载: " + downloadedFilename + (sizeStr ? " (" + sizeStr + ")" : "");
+                                self.setDirtyCanvas(true, true);
+                                downloading = false;
+                                return;
+                            }
+                            if (pj.status === "error") {
+                                dlBtn.name = "下载失败: " + (pj.error || "").slice(0, 40);
+                                self.setDirtyCanvas(true, true);
+                                downloading = false;
+                                return;
+                            }
+                            if (pj.status === "downloading") {
+                                const pct = pj.total > 0 ? ((pj.downloaded / pj.total) * 100).toFixed(1) + "%" : "";
+                                const dlStr = fmtSize(pj.downloaded);
+                                const totalStr = pj.total > 0 ? "/" + fmtSize(pj.total) : "";
+                                dlBtn.name = "下载中 " + dlStr + totalStr + (pct ? " " + pct : "");
+                                self.setDirtyCanvas(true, true);
+                            }
+                        } catch (e) {}
+                        if (downloading) {
+                            setTimeout(pollProgress, 1000);
+                        }
+                    };
+                    setTimeout(pollProgress, 500);
                 } catch (e) {
                     dlBtn.name = "下载失败: " + e;
                     self.setDirtyCanvas(true, true);
+                    downloading = false;
                 }
             });
 
@@ -71,7 +122,7 @@ app.registerExtension({
                         self.setDirtyCanvas(true, true);
                         return;
                     }
-                    const msg = "解压" + j.extracted_count + "个" + (j.skipped_count > 0 ? ",跳过" + j.skipped_count + "个" : "");
+                    const msg = "解压" + j.moved_count + "个" + (j.skipped_count > 0 ? ",跳过" + j.skipped_count + "个" : "");
                     exBtn.name = msg;
                     self.setDirtyCanvas(true, true);
                 } catch (e) {
