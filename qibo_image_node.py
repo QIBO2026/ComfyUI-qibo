@@ -1094,6 +1094,8 @@ class QIBOBatchImageEditNode:
                 "steps": ("INT", {"default": 30, "min": 1, "max": 100}),
                 "guidance": ("FLOAT", {"default": 3.5, "min": 0.1, "max": 20.0, "step": 0.1}),
                 "seed": ("INT", {"default": -1}),
+                "separate_upload": ("BOOLEAN", {"default": False,
+                                       "tooltip": "开启：参考图分别上传（≤4张各自独立发送，>4张拼接）；关闭（默认）：所有参考图拼接成一张发送"}),
             }
         }
 
@@ -1128,9 +1130,62 @@ class QIBOBatchImageEditNode:
             token = tokens[0] if tokens else ""
         return upload_images_to_repo(images_list, token)
 
+    def _concat_images_to_single(self, pils, prompt_text, token, sid=""):
+        """把多张 PIL 图拼接成网格图，上传获取 URL，返回 (single_url, modified_prompt, concat_ok)。"""
+        orig_count = len(pils)
+        if orig_count <= 6:
+            grid_rows, grid_cols = 2, 3
+        else:
+            grid_rows, grid_cols = 3, 3
+        max_cells = grid_rows * grid_cols
+        valid_pils = pils[:max_cells] if orig_count > max_cells else pils
+        if orig_count > max_cells:
+            print(f"  ✂️ 参考图超过 {max_cells} 张，截断到前 {max_cells} 张按 {grid_rows}x{grid_cols} 拼接", flush=True)
+            orig_count = max_cells
+        cell_w = min(p.size[0] for p in valid_pils)
+        cell_h = min(p.size[1] for p in valid_pils)
+        grid_imgs = [p.resize((cell_w, cell_h), Image.LANCZOS) for p in valid_pils]
+        gap = max(cell_w, cell_h) // 20
+        grid_total_w = grid_cols * cell_w + (grid_cols + 1) * gap
+        grid_total_h = grid_rows * cell_h + (grid_rows + 1) * gap
+        concat_img = Image.new('RGB', (grid_total_w, grid_total_h), (255, 255, 255))
+        for idx, p in enumerate(grid_imgs):
+            r = idx // grid_cols
+            c = idx % grid_cols
+            concat_img.paste(p, (gap + c * (cell_w + gap), gap + r * (cell_h + gap)))
+        cw, ch = concat_img.size
+        if max(cw, ch) > 2048:
+            ratio = 2048 / max(cw, ch)
+            concat_img = concat_img.resize((int(cw * ratio), int(ch * ratio)), Image.LANCZOS)
+            print(f"  📐 网格图 {cw}x{ch} 超限，缩放至 {concat_img.size[0]}x{concat_img.size[1]}", flush=True)
+        try:
+            concat_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "output", "qibo_concat")
+            os.makedirs(concat_dir, exist_ok=True)
+            concat_local_name = f"concat_{int(time.time()*1000)}_{grid_rows}x{grid_cols}_{orig_count}.jpg"
+            concat_local_path = os.path.join(concat_dir, concat_local_name)
+            concat_img.save(concat_local_path, format="JPEG", quality=90)
+            print(f"  💾 拼接图已保存本地: {concat_local_path}", flush=True)
+            concat_url, is_repo = pil_to_repo_url_or_base64(concat_img, token)
+            pos_descs = []
+            for i in range(orig_count):
+                r = i // grid_cols + 1
+                c = i % grid_cols + 1
+                pos_descs.append(f"第{r}行第{c}列为第{i+1}格")
+            concat_note = f"参考图1是角色参考合成图（{grid_rows}行{grid_cols}列网格，{'，'.join(pos_descs)}，第N格即角色N）。请提取描述中提到的角色的外貌、服饰、表情特征，生成一张所有被提到角色在同一场景中自然互动的完整连贯画面，不要保留网格边框和白色间隔。"
+            new_prompt = prompt_text
+            for orig_idx in range(orig_count, 0, -1):
+                new_prompt = new_prompt.replace(f"图{orig_idx}", f"角色{orig_idx}")
+            prompt_text = concat_note + new_prompt
+            src_label = "仓库URL" if is_repo else "base64"
+            print(f"🔗 [{sid}] 参考图 {orig_count} 张已以{grid_rows}x{grid_cols}网格拼接为1张 {src_label}，API提交 1 张", flush=True)
+            return (concat_url, prompt_text, True)
+        except Exception as e:
+            print(f"⚠️ 网格图拼接异常: {e}，回退截取前4张", flush=True)
+            return (None, prompt_text, False)
+
     def _submit_task(self, prompt_text, negative_text,
                      edit_model, width, height, steps, guidance, seed,
-                     token, cached_upload, task_meta=None):
+                     token, cached_upload, task_meta=None, separate_upload=False):
         """提交单张生图任务到 ModelScope API，记录 task_id 落盘，不轮询。
         返回 (task_id, image_urls, seed_used) 或 None。
 
@@ -1152,62 +1207,22 @@ class QIBOBatchImageEditNode:
 
         sid = task_meta.get('shot_id', '') if task_meta else ''
 
-        if len(image_urls) > 4:
-            valid_pils = pils  # 已保证一一对应
-            orig_count = len(image_urls)
-            # 仅使用 2x3 或 3x3 网格：5-6 张→2x3，7-9 张→3x3，>9 张截断到前 9 张按 3x3
-            if orig_count <= 6:
-                grid_rows, grid_cols = 2, 3
-            else:
-                grid_rows, grid_cols = 3, 3
-            max_cells = grid_rows * grid_cols
-            if orig_count > max_cells:
-                valid_pils = valid_pils[:max_cells]
-                orig_count = max_cells
-                print(f"  ✂️ 参考图超过 {max_cells} 张，截断到前 {max_cells} 张按 {grid_rows}x{grid_cols} 拼接", flush=True)
-            cell_w = min(p.size[0] for p in valid_pils)
-            cell_h = min(p.size[1] for p in valid_pils)
-            grid_imgs = [p.resize((cell_w, cell_h), Image.LANCZOS) for p in valid_pils]
-            gap = max(cell_w, cell_h) // 20
-            grid_total_w = grid_cols * cell_w + (grid_cols + 1) * gap
-            grid_total_h = grid_rows * cell_h + (grid_rows + 1) * gap
-            concat_img = Image.new('RGB', (grid_total_w, grid_total_h), (255, 255, 255))
-            for idx, p in enumerate(grid_imgs):
-                r = idx // grid_cols
-                c = idx % grid_cols
-                concat_img.paste(p, (gap + c * (cell_w + gap), gap + r * (cell_h + gap)))
-            cw, ch = concat_img.size
-            if max(cw, ch) > 2048:
-                ratio = 2048 / max(cw, ch)
-                concat_img = concat_img.resize((int(cw * ratio), int(ch * ratio)), Image.LANCZOS)
-                print(f"  📐 网格图 {cw}x{ch} 超限，缩放至 {concat_img.size[0]}x{concat_img.size[1]}", flush=True)
-            concat_ok = False
-            try:
-                concat_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "output", "qibo_concat")
-                os.makedirs(concat_dir, exist_ok=True)
-                concat_local_name = f"concat_{int(time.time()*1000)}_{grid_rows}x{grid_cols}_{orig_count}.jpg"
-                concat_local_path = os.path.join(concat_dir, concat_local_name)
-                concat_img.save(concat_local_path, format="JPEG", quality=90)
-                print(f"  💾 拼接图已保存本地: {concat_local_path}", flush=True)
-                concat_url, is_repo = pil_to_repo_url_or_base64(concat_img, token)
-                pos_descs = []
-                for i in range(orig_count):
-                    r = i // grid_cols + 1
-                    c = i % grid_cols + 1
-                    pos_descs.append(f"第{r}行第{c}列为第{i+1}格")
-                concat_note = f"参考图1是角色参考合成图（{grid_rows}行{grid_cols}列网格，{'，'.join(pos_descs)}，第N格即角色N）。请提取描述中提到的角色的外貌、服饰、表情特征，生成一张所有被提到角色在同一场景中自然互动的完整连贯画面，不要保留网格边框和白色间隔。"
-                new_prompt = prompt_text
-                for orig_idx in range(orig_count, 0, -1):
-                    new_prompt = new_prompt.replace(f"图{orig_idx}", f"角色{orig_idx}")
-                prompt_text = concat_note + new_prompt
+        if not separate_upload and len(image_urls) > 1:
+            concat_url, new_prompt, ok = self._concat_images_to_single(pils, prompt_text, token, sid)
+            if ok:
                 image_urls = [concat_url]
-                concat_ok = True
-                src_label = "仓库URL" if is_repo else "base64"
-                print(f"🔗 [{sid}] 参考图 {orig_count} 张超上限，已以{grid_rows}x{grid_cols}网格拼接为1张 {src_label}，API提交 1 张", flush=True)
-            except Exception as e:
-                print(f"⚠️ 网格图拼接异常: {e}，回退截取前4张", flush=True)
-            if not concat_ok:
+                prompt_text = new_prompt
+            else:
                 image_urls = image_urls[:4]
+                prompt_text = f"以下图1至图{len(image_urls)}为角色参考图，请提取各角色的外貌、服饰、表情特征用于生成新画面，不要直接复制参考图。{prompt_text}"
+        elif separate_upload and len(image_urls) > 4:
+            concat_url, new_prompt, ok = self._concat_images_to_single(pils, prompt_text, token, sid)
+            if ok:
+                image_urls = [concat_url]
+                prompt_text = new_prompt
+            else:
+                image_urls = image_urls[:4]
+                prompt_text = f"以下图1至图{len(image_urls)}为角色参考图，请提取各角色的外貌、服饰、表情特征用于生成新画面，不要直接复制参考图。{prompt_text}"
         else:
             if len(image_urls) > 1:
                 prompt_text = f"以下图1至图{len(image_urls)}为角色参考图，请提取各角色的外貌、服饰、表情特征用于生成新画面，不要直接复制参考图。{prompt_text}"
@@ -1358,7 +1373,7 @@ class QIBOBatchImageEditNode:
     def _generate_one(self, images_list, prompt_text, negative_text,
                       edit_model, width, height, steps, guidance, seed,
                       tokens, config, cached_upload=None, progress_ctx=None, task_meta=None,
-                      port_nums=None):
+                      port_nums=None, separate_upload=False):
         last_exception = None
         for i, token in enumerate(tokens):
             try:
@@ -1407,6 +1422,26 @@ class QIBOBatchImageEditNode:
 
                 if not image_urls:
                     raise Exception("所有图片上传失败")
+
+                if not separate_upload and len(image_urls) > 1 and compressed_pils:
+                    sid = task_meta.get('shot_id', '') if task_meta else ''
+                    concat_url, new_prompt, ok = self._concat_images_to_single(compressed_pils, prompt_text, token, sid)
+                    if ok:
+                        image_urls = [concat_url]
+                        prompt_text = new_prompt
+                    else:
+                        prompt_text = f"以下图1至图{len(image_urls)}为角色参考图，请提取各角色的外貌、服饰、表情特征用于生成新画面，不要直接复制参考图。{prompt_text}"
+                elif separate_upload and len(image_urls) > 4 and compressed_pils:
+                    sid = task_meta.get('shot_id', '') if task_meta else ''
+                    concat_url, new_prompt, ok = self._concat_images_to_single(compressed_pils, prompt_text, token, sid)
+                    if ok:
+                        image_urls = [concat_url]
+                        prompt_text = new_prompt
+                    else:
+                        image_urls = image_urls[:4]
+                        prompt_text = f"以下图1至图{len(image_urls)}为角色参考图，请提取各角色的外貌、服饰、表情特征用于生成新画面，不要直接复制参考图。{prompt_text}"
+                elif len(image_urls) > 1:
+                    prompt_text = f"以下图1至图{len(image_urls)}为角色参考图，请提取各角色的外貌、服饰、表情特征用于生成新画面，不要直接复制参考图。{prompt_text}"
 
                 prompt_text = _truncate_prompt(prompt_text)
                 payload = {'model': edit_model, 'prompt': prompt_text}
@@ -1546,7 +1581,8 @@ class QIBOBatchImageEditNode:
 
     def batch_edit(self, images, prompt, api_tokens,
                    negative_prompt="", edit_model="Qwen/Qwen-Image-Edit",
-                   aspect_ratio="1:1", base_size=1024, steps=30, guidance=3.5, seed=-1):
+                   aspect_ratio="1:1", base_size=1024, steps=30, guidance=3.5, seed=-1,
+                   separate_upload=False):
         _BATCH_CANCEL["cancelled"] = False
         width, height = _resolve_aspect_size(aspect_ratio, base_size)
         config = load_config()
@@ -1581,13 +1617,14 @@ class QIBOBatchImageEditNode:
             save_tokens_on_success(api_tokens)
             return self._batch_from_json(spec, images_list, prompt, negative_prompt,
                                          edit_model, width, height, steps, guidance, seed,
-                                         tokens, config, cached_upload=cached_upload, seq_nums=seq_nums)
+                                         tokens, config, cached_upload=cached_upload, seq_nums=seq_nums,
+                                         separate_upload=separate_upload)
 
         batch_port_nums = list(range(1, len(images_list) + 1))
         image_tensor, ref_pils, _ = self._generate_one(
             images_list, prompt, negative_prompt,
             edit_model, width, height, steps, guidance, seed, tokens, config,
-            port_nums=batch_port_nums)
+            port_nums=batch_port_nums, separate_upload=separate_upload)
         ref_tensor = _pils_to_batch(ref_pils)
         qibodata = {"image": image_tensor, "prompt": prompt, "model": edit_model, "ref_images": ref_tensor}
         save_tokens_on_success(api_tokens)
@@ -1595,7 +1632,8 @@ class QIBOBatchImageEditNode:
 
     def _batch_from_json(self, spec, images_list, prompt, negative_prompt,
                          edit_model, width, height, steps, guidance, seed,
-                         tokens, config, cached_upload=None, seq_nums=None):
+                         tokens, config, cached_upload=None, seq_nums=None,
+                         separate_upload=False):
         shots = spec.get("shots", [])
         global_style = spec.get("global_style", "")
         global_negative = spec.get("global_negative_prompt", "")
@@ -1686,7 +1724,8 @@ class QIBOBatchImageEditNode:
             submit_result = self._submit_task(
                 full_prompt, full_negative,
                 edit_model, width, height, steps, guidance, seed,
-                shot_token, shot_cached, task_meta=task_meta)
+                shot_token, shot_cached, task_meta=task_meta,
+                separate_upload=separate_upload)
             if submit_result:
                 task_id, image_urls, seed_used = submit_result
                 submitted_tasks.append({

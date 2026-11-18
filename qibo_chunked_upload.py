@@ -227,6 +227,36 @@ def register_server_routes():
             return web.json_response({"cancelled": True, "upload_id": upload_id})
         return web.json_response({"error": "invalid upload_id"}, status=404)
 
+    @routes.get("/qibo/chunked_upload/toggle")
+    async def chunked_toggle_get(request):
+        config_path = os.path.join(os.path.dirname(__file__), "qibo_config.json")
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        enabled = config.get("chunked_upload_enabled", False)
+        return web.json_response({"enabled": enabled})
+
+    @routes.post("/qibo/chunked_upload/toggle")
+    async def chunked_toggle_set(request):
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        enabled = bool(data.get("enabled", False))
+        config_path = os.path.join(os.path.dirname(__file__), "qibo_config.json")
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["chunked_upload_enabled"] = enabled
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        print(f"📦 QIBO 分块上传开关: {'开启' if enabled else '关闭'}", flush=True)
+        return web.json_response({"enabled": enabled})
+
 
 def chunked_upload(
     file_path: str,

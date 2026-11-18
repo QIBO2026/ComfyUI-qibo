@@ -129,6 +129,7 @@
     "max_wait_seconds": 600
   },
 
+  "chunked_upload_enabled": false,
   "login_config": {
     "base_url": "https://modelscope.cn",
     "login_page_url": "https://modelscope.cn/login",

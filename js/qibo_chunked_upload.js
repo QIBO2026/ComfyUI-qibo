@@ -4,6 +4,9 @@
  * 自动拦截所有发往 /upload/image 的请求，当文件超过阈值时
  * 自动切分成多个小 chunk 逐块上传，服务端合并后返回。
  * 用户点击任意节点的"上传图片"按钮即可自动生效，无需额外操作。
+ *
+ * 开关控制：默认关闭，需通过右下角开关按钮手动开启。
+ * 开关状态持久化在 qibo_config.json 中。
  */
 import { app } from "/scripts/app.js";
 
@@ -11,6 +14,8 @@ const CHUNK_SIZE = 512 * 1024;
 const THRESHOLD = 1024 * 1024;
 
 let _progressEl = null;
+let _interceptorsInstalled = false;
+let _toggleBtn = null;
 
 function _showProgress(received, total, filename) {
     if (!_progressEl) {
@@ -173,12 +178,73 @@ function _installXHRInterceptor() {
     console.log("[QIBO] XHR 拦截器已安装");
 }
 
+function _createToggleBtn(enabled) {
+    if (_toggleBtn) _toggleBtn.remove();
+    _toggleBtn = document.createElement("div");
+    _toggleBtn.style.cssText = `
+        position: fixed; bottom: 20px; left: 20px; z-index: 99998;
+        background: ${enabled ? "#1b3a1b" : "#1e1e1e"}; color: ${enabled ? "#4CAF50" : "#888"};
+        border: 1px solid ${enabled ? "#4CAF50" : "#555"}; border-radius: 8px;
+        padding: 8px 14px; font-size: 12px; font-family: monospace;
+        cursor: pointer; user-select: none; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        transition: all 0.2s;
+    `;
+    _toggleBtn.innerHTML = enabled
+        ? "📦 分块上传: <b style='color:#4CAF50'>ON</b>"
+        : "📦 分块上传: <b style='color:#888'>OFF</b>";
+    _toggleBtn.title = "点击切换大图片分块上传功能";
+    _toggleBtn.addEventListener("click", async () => {
+        const newEnabled = !enabled;
+        try {
+            const resp = await fetch("/qibo/chunked_upload/toggle", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled: newEnabled }),
+            });
+            if (resp.ok) {
+                enabled = newEnabled;
+                _toggleBtn.style.background = newEnabled ? "#1b3a1b" : "#1e1e1e";
+                _toggleBtn.style.color = newEnabled ? "#4CAF50" : "#888";
+                _toggleBtn.style.borderColor = newEnabled ? "#4CAF50" : "#555";
+                _toggleBtn.innerHTML = newEnabled
+                    ? "📦 分块上传: <b style='color:#4CAF50'>ON</b>"
+                    : "📦 分块上传: <b style='color:#888'>OFF</b>";
+                if (newEnabled && !_interceptorsInstalled) {
+                    _installFetchInterceptor();
+                    _installXHRInterceptor();
+                    _interceptorsInstalled = true;
+                }
+                console.log(`[QIBO] 分块上传已${newEnabled ? "开启" : "关闭"}`);
+            }
+        } catch (err) {
+            console.warn("[QIBO] 切换开关失败:", err.message);
+        }
+    });
+    document.body.appendChild(_toggleBtn);
+}
+
 app.registerExtension({
     name: "ComfyUI-qibo.ChunkedUpload",
 
     async setup() {
-        _installFetchInterceptor();
-        _installXHRInterceptor();
-        console.log("[QIBO] 分块上传扩展已加载（自动拦截模式）");
+        let enabled = false;
+        try {
+            const resp = await fetch("/qibo/chunked_upload/toggle");
+            if (resp.ok) {
+                const data = await resp.json();
+                enabled = !!data.enabled;
+            }
+        } catch (err) {
+            console.warn("[QIBO] 读取分块上传配置失败，默认关闭:", err.message);
+        }
+
+        if (enabled) {
+            _installFetchInterceptor();
+            _installXHRInterceptor();
+            _interceptorsInstalled = true;
+        }
+
+        _createToggleBtn(enabled);
+        console.log(`[QIBO] 分块上传扩展已加载（当前: ${enabled ? "开启" : "关闭"}）`);
     },
 });
