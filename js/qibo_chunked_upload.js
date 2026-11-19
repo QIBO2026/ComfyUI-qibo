@@ -7,8 +7,13 @@
  *
  * 开关控制：默认关闭，需通过右下角开关按钮手动开启。
  * 开关状态持久化在 qibo_config.json 中。
+ * 代码级默认值由 CHUNKED_UPLOAD_ENABLED 常量控制，API 读取失败时回退到此值。
  */
 import { app } from "/scripts/app.js";
+
+// ========== 分块上传开关（代码级默认值，改 true 即开启） ==========
+const CHUNKED_UPLOAD_ENABLED = false;
+// ==================================================================
 
 const CHUNK_SIZE = 512 * 1024;
 const THRESHOLD = 1024 * 1024;
@@ -227,7 +232,7 @@ app.registerExtension({
     name: "ComfyUI-qibo.ChunkedUpload",
 
     async setup() {
-        let enabled = false;
+        let enabled = CHUNKED_UPLOAD_ENABLED;
         try {
             const resp = await fetch("/qibo/chunked_upload/toggle");
             if (resp.ok) {
@@ -235,7 +240,7 @@ app.registerExtension({
                 enabled = !!data.enabled;
             }
         } catch (err) {
-            console.warn("[QIBO] 读取分块上传配置失败，默认关闭:", err.message);
+            console.warn("[QIBO] 读取分块上传配置失败，使用代码默认值:", CHUNKED_UPLOAD_ENABLED, err.message);
         }
 
         if (enabled) {

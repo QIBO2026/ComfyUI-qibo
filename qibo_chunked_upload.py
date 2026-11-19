@@ -9,7 +9,16 @@ QIBO 分块上传模块
   POST /qibo/chunked_upload/merge   — 合并所有分块，写入 input 目录
   GET  /qibo/chunked_upload/status  — 查询上传进度
   POST /qibo/chunked_upload/cancel  — 取消并清理临时文件
+
+开关说明：
+  CHUNKED_UPLOAD_ENABLED 为代码级默认开关，默认 False（关闭）。
+  运行时可通过前端 UI 按钮 或 qibo_config.json 的 chunked_upload_enabled 字段覆盖。
+  优先级：qibo_config.json > CHUNKED_UPLOAD_ENABLED 常量。
 """
+
+# ========== 分块上传开关（代码级默认值，改 True 即开启） ==========
+CHUNKED_UPLOAD_ENABLED = False
+# ==================================================================
 
 import os
 import uuid
@@ -235,7 +244,7 @@ def register_server_routes():
                 config = json.load(f)
         except Exception:
             config = {}
-        enabled = config.get("chunked_upload_enabled", False)
+        enabled = config.get("chunked_upload_enabled", CHUNKED_UPLOAD_ENABLED)
         return web.json_response({"enabled": enabled})
 
     @routes.post("/qibo/chunked_upload/toggle")

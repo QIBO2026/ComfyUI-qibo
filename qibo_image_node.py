@@ -22,6 +22,8 @@ from .qibo_repo_uploader import (
     pil_to_repo_url_or_base64
 )
 
+SEPARATE_UPLOAD_ENABLED = False
+
 try:
     from server import PromptServer
     from aiohttp import web
@@ -1094,8 +1096,7 @@ class QIBOBatchImageEditNode:
                 "steps": ("INT", {"default": 30, "min": 1, "max": 100}),
                 "guidance": ("FLOAT", {"default": 3.5, "min": 0.1, "max": 20.0, "step": 0.1}),
                 "seed": ("INT", {"default": -1}),
-                "separate_upload": ("BOOLEAN", {"default": False,
-                                       "tooltip": "开启：参考图分别上传（≤4张各自独立发送，>4张拼接）；关闭（默认）：所有参考图拼接成一张发送"}),
+
             }
         }
 
@@ -1185,7 +1186,7 @@ class QIBOBatchImageEditNode:
 
     def _submit_task(self, prompt_text, negative_text,
                      edit_model, width, height, steps, guidance, seed,
-                     token, cached_upload, task_meta=None, separate_upload=False):
+                     token, cached_upload, task_meta=None):
         """提交单张生图任务到 ModelScope API，记录 task_id 落盘，不轮询。
         返回 (task_id, image_urls, seed_used) 或 None。
 
@@ -1207,7 +1208,7 @@ class QIBOBatchImageEditNode:
 
         sid = task_meta.get('shot_id', '') if task_meta else ''
 
-        if not separate_upload and len(image_urls) > 1:
+        if not SEPARATE_UPLOAD_ENABLED and len(image_urls) > 1:
             concat_url, new_prompt, ok = self._concat_images_to_single(pils, prompt_text, token, sid)
             if ok:
                 image_urls = [concat_url]
@@ -1215,7 +1216,7 @@ class QIBOBatchImageEditNode:
             else:
                 image_urls = image_urls[:4]
                 prompt_text = f"以下图1至图{len(image_urls)}为角色参考图，请提取各角色的外貌、服饰、表情特征用于生成新画面，不要直接复制参考图。{prompt_text}"
-        elif separate_upload and len(image_urls) > 4:
+        elif SEPARATE_UPLOAD_ENABLED and len(image_urls) > 4:
             concat_url, new_prompt, ok = self._concat_images_to_single(pils, prompt_text, token, sid)
             if ok:
                 image_urls = [concat_url]
@@ -1373,7 +1374,7 @@ class QIBOBatchImageEditNode:
     def _generate_one(self, images_list, prompt_text, negative_text,
                       edit_model, width, height, steps, guidance, seed,
                       tokens, config, cached_upload=None, progress_ctx=None, task_meta=None,
-                      port_nums=None, separate_upload=False):
+                      port_nums=None):
         last_exception = None
         for i, token in enumerate(tokens):
             try:
@@ -1423,7 +1424,7 @@ class QIBOBatchImageEditNode:
                 if not image_urls:
                     raise Exception("所有图片上传失败")
 
-                if not separate_upload and len(image_urls) > 1 and compressed_pils:
+                if not SEPARATE_UPLOAD_ENABLED and len(image_urls) > 1 and compressed_pils:
                     sid = task_meta.get('shot_id', '') if task_meta else ''
                     concat_url, new_prompt, ok = self._concat_images_to_single(compressed_pils, prompt_text, token, sid)
                     if ok:
@@ -1431,7 +1432,7 @@ class QIBOBatchImageEditNode:
                         prompt_text = new_prompt
                     else:
                         prompt_text = f"以下图1至图{len(image_urls)}为角色参考图，请提取各角色的外貌、服饰、表情特征用于生成新画面，不要直接复制参考图。{prompt_text}"
-                elif separate_upload and len(image_urls) > 4 and compressed_pils:
+                elif SEPARATE_UPLOAD_ENABLED and len(image_urls) > 4 and compressed_pils:
                     sid = task_meta.get('shot_id', '') if task_meta else ''
                     concat_url, new_prompt, ok = self._concat_images_to_single(compressed_pils, prompt_text, token, sid)
                     if ok:
@@ -1581,8 +1582,7 @@ class QIBOBatchImageEditNode:
 
     def batch_edit(self, images, prompt, api_tokens,
                    negative_prompt="", edit_model="Qwen/Qwen-Image-Edit",
-                   aspect_ratio="1:1", base_size=1024, steps=30, guidance=3.5, seed=-1,
-                   separate_upload=False):
+                   aspect_ratio="1:1", base_size=1024, steps=30, guidance=3.5, seed=-1):
         _BATCH_CANCEL["cancelled"] = False
         width, height = _resolve_aspect_size(aspect_ratio, base_size)
         config = load_config()
@@ -1617,14 +1617,13 @@ class QIBOBatchImageEditNode:
             save_tokens_on_success(api_tokens)
             return self._batch_from_json(spec, images_list, prompt, negative_prompt,
                                          edit_model, width, height, steps, guidance, seed,
-                                         tokens, config, cached_upload=cached_upload, seq_nums=seq_nums,
-                                         separate_upload=separate_upload)
+                                         tokens, config, cached_upload=cached_upload, seq_nums=seq_nums)
 
         batch_port_nums = list(range(1, len(images_list) + 1))
         image_tensor, ref_pils, _ = self._generate_one(
             images_list, prompt, negative_prompt,
             edit_model, width, height, steps, guidance, seed, tokens, config,
-            port_nums=batch_port_nums, separate_upload=separate_upload)
+            port_nums=batch_port_nums)
         ref_tensor = _pils_to_batch(ref_pils)
         qibodata = {"image": image_tensor, "prompt": prompt, "model": edit_model, "ref_images": ref_tensor}
         save_tokens_on_success(api_tokens)
@@ -1632,8 +1631,7 @@ class QIBOBatchImageEditNode:
 
     def _batch_from_json(self, spec, images_list, prompt, negative_prompt,
                          edit_model, width, height, steps, guidance, seed,
-                         tokens, config, cached_upload=None, seq_nums=None,
-                         separate_upload=False):
+                         tokens, config, cached_upload=None, seq_nums=None):
         shots = spec.get("shots", [])
         global_style = spec.get("global_style", "")
         global_negative = spec.get("global_negative_prompt", "")
@@ -1724,8 +1722,7 @@ class QIBOBatchImageEditNode:
             submit_result = self._submit_task(
                 full_prompt, full_negative,
                 edit_model, width, height, steps, guidance, seed,
-                shot_token, shot_cached, task_meta=task_meta,
-                separate_upload=separate_upload)
+                shot_token, shot_cached, task_meta=task_meta)
             if submit_result:
                 task_id, image_urls, seed_used = submit_result
                 submitted_tasks.append({
