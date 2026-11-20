@@ -116,6 +116,7 @@ class QIBOMultiImageLoader:
     def load_images(self, image_files, auto_link="自动", upscale_method="bilinear",
                     megapixels=0.0, resolution_steps=32):
         files = self._parse_files(image_files)
+        placeholder = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
         results = []
         for i in range(MAX_IMAGES):
             if i < len(files):
@@ -125,9 +126,9 @@ class QIBOMultiImageLoader:
                     results.append(img)
                 except Exception as e:
                     print(f"[QIBOMultiImageLoader] 读取失败 {files[i]}: {e}")
-                    results.append(None)
+                    results.append(placeholder)
             else:
-                results.append(None)
+                results.append(placeholder)
         return tuple(results)
 
 
